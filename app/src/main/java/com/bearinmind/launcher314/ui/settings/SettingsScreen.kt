@@ -141,6 +141,8 @@ fun SettingsScreen(
 
     // Icon size state (shared between home screen and app drawer previews)
     var sharedIconSizePercent by remember { mutableFloatStateOf(getDrawerIconSizePercent(context).toFloat()) }
+    // Grid values shared by both previews for the icon-size warning (issue #118)
+    val previewGrid = remember { PreviewGridState(context) }
     var globalIconShape by remember { mutableStateOf(getGlobalIconShape(context)) }
     var globalIconBgColor by remember { mutableStateOf(getGlobalIconBgColor(context)) }
     var globalIconBgIntensity by remember { mutableStateOf(getGlobalIconBgIntensity(context)) }
@@ -279,7 +281,8 @@ fun SettingsScreen(
                         iconBgColorOverride = globalIconBgColor,
                         iconBgIntensityOverride = globalIconBgIntensity,
                         onEditDrawerSettingsClick = onEditDrawerSettingsClick,
-                        onManageTabsClick = onManageTabsClick
+                        onManageTabsClick = onManageTabsClick,
+                        previewGrid = previewGrid
                     )
                 }
 
@@ -298,7 +301,8 @@ fun SettingsScreen(
                         onSharedIconSizeChanged = { sharedIconSizePercent = it },
                         iconShapeOverride = globalIconShape,
                         iconBgColorOverride = globalIconBgColor,
-                        iconBgIntensityOverride = globalIconBgIntensity
+                        iconBgIntensityOverride = globalIconBgIntensity,
+                        previewGrid = previewGrid
                     )
                 }
 

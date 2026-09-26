@@ -36,7 +36,7 @@ fun VerticalIconSizeSlider(
     onSizeChangeFinished: () -> Unit,
     overflowThreshold: Float = 125f  // above this value, track/thumb turns red (visual warning only)
 ) {
-    // Experimental (issue #50): "Extended icon sizes" opens the range to 200% and the overflow cap becomes a warning only.
+    // Experimental (issue #50): "Extended icon sizes" opens the range to 200%.
     val extendedCtx = androidx.compose.ui.platform.LocalContext.current
     val extendedSizes = remember { com.bearinmind.launcher314.data.getExtendedIconSizes(extendedCtx) }
     val minValue = 50f
@@ -48,9 +48,6 @@ fun VerticalIconSizeSlider(
     // Snap to 5% increments (when linked, snap to linked values within range)
     val snapTickValues = if (isLinked) listOf(67, 80, 100, 133, 160, 200).filter { it <= effectiveMax.toInt() } else minorTickValues
 
-    // Cap at highest usable snap value (below overflow threshold); extended mode drags the full range.
-    val dragMax = if (extendedSizes || overflowThreshold >= effectiveMax) effectiveMax
-        else snapTickValues.filter { it.toFloat() <= overflowThreshold }.maxOrNull()?.toFloat() ?: minValue
     // Clamp currentSize to full range (allow dragging into red zone)
     val clampedSize = currentSize.coerceIn(minValue, effectiveMax)
     // Animated value for smooth transitions
@@ -60,11 +57,16 @@ fun VerticalIconSizeSlider(
     // Track if user is currently dragging
     var isDragging by remember { mutableStateOf(false) }
     var isDragOnThumb by remember { mutableStateOf(false) }  // Only drag if started on thumb
-    var isOverflowSnapping by remember { mutableStateOf(false) }
+    // Finger value, set synchronously for the release — animatedValue lags when busy (issue #118).
+    var dragValue by remember { mutableFloatStateOf(clampedSize) }
+    var downY by remember { mutableFloatStateOf(0f) }  // touch-down point for the thumb hit test
+    // Fresh callbacks without re-keying pointerInput — a restart kills the drag (issue #118).
+    val currentOnSizeChange by rememberUpdatedState(onSizeChange)
+    val currentOnSizeChangeFinished by rememberUpdatedState(onSizeChangeFinished)
 
     // Sync animated value with external changes (e.g., linked slider); animate when not dragging.
     LaunchedEffect(clampedSize) {
-        if (!isDragging && !isOverflowSnapping) {
+        if (!isDragging) {
             animatedValue.animateTo(
                 targetValue = clampedSize,
                 animationSpec = spring(
@@ -129,10 +131,11 @@ fun VerticalIconSizeSlider(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .pointerInput(isLinked, overflowThreshold) { // Rebuild when linked state or threshold changes
+                    .onEachDown { downY = it.y }
+                    .pointerInput(isLinked) { // Rebuild when linked state changes
                         detectDragGestures(
-                            onDragStart = { offset ->
-                                val y = offset.y
+                            onDragStart = { _ ->
+                                val y = downY
                                 val height = size.height.toFloat()
                                 // Compute thumb position from current animated value (not stale captured thumbFraction)
                                 val currentThumbFraction = (1f - (animatedValue.value - minValue) / (effectiveMax - minValue)).coerceIn(0f, 1f)
@@ -143,33 +146,28 @@ fun VerticalIconSizeSlider(
                                 if (kotlin.math.abs(y - currentThumbY) <= thumbTouchRadius) {
                                     isDragging = true
                                     isDragOnThumb = true
+                                    dragValue = animatedValue.value
                                 } else {
                                     isDragOnThumb = false
                                 }
                             },
                             onDragEnd = {
                                 if (isDragOnThumb) {
-                                    // Released from the red overflow zone: bouncy-spring back to the nearest valid tick.
-                                    val validSnaps = snapTickValues.filter { it.toFloat() <= dragMax }
-                                    val snappedValue = validSnaps.minByOrNull {
-                                        kotlin.math.abs(it - animatedValue.value)
-                                    }?.toFloat() ?: dragMax
-                                    val wasInOverflow = animatedValue.value > dragMax
-                                    if (wasInOverflow) isOverflowSnapping = true
-                                    onSizeChange(snappedValue)
+                                    // Nearest tick; the red zone is a warning only (issue #118).
+                                    val snappedValue = snapTickValues.minByOrNull {
+                                        kotlin.math.abs(it - dragValue)
+                                    }?.toFloat() ?: dragValue
+                                    currentOnSizeChange(snappedValue)
                                     coroutineScope.launch {
+                                        animatedValue.snapTo(dragValue) // catch up with the finger first
                                         animatedValue.animateTo(
                                             targetValue = snappedValue,
-                                            animationSpec = if (wasInOverflow) spring(
-                                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                stiffness = 300f
-                                            ) else spring(
+                                            animationSpec = spring(
                                                 dampingRatio = Spring.DampingRatioMediumBouncy,
                                                 stiffness = Spring.StiffnessMedium
                                             )
                                         )
-                                        isOverflowSnapping = false
-                                        onSizeChangeFinished()
+                                        currentOnSizeChangeFinished()
                                     }
                                 }
                                 isDragging = false
@@ -177,26 +175,20 @@ fun VerticalIconSizeSlider(
                             },
                             onDragCancel = {
                                 if (isDragOnThumb) {
-                                    // Same snap-back as onDragEnd (a cancel can carry the release).
-                                    val validSnaps = snapTickValues.filter { it.toFloat() <= dragMax }
-                                    val snappedValue = validSnaps.minByOrNull {
-                                        kotlin.math.abs(it - animatedValue.value)
-                                    }?.toFloat() ?: dragMax
-                                    val wasInOverflow = animatedValue.value > dragMax
-                                    if (wasInOverflow) isOverflowSnapping = true
-                                    onSizeChange(snappedValue)
+                                    // Same snap as onDragEnd (a cancel can carry the release).
+                                    val snappedValue = snapTickValues.minByOrNull {
+                                        kotlin.math.abs(it - dragValue)
+                                    }?.toFloat() ?: dragValue
+                                    currentOnSizeChange(snappedValue)
                                     coroutineScope.launch {
+                                        animatedValue.snapTo(dragValue)
                                         animatedValue.animateTo(
                                             targetValue = snappedValue,
-                                            animationSpec = if (wasInOverflow) spring(
-                                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                stiffness = 300f
-                                            ) else spring(
+                                            animationSpec = spring(
                                                 dampingRatio = Spring.DampingRatioMediumBouncy,
                                                 stiffness = Spring.StiffnessMedium
                                             )
                                         )
-                                        isOverflowSnapping = false
                                     }
                                 }
                                 isDragging = false
@@ -209,10 +201,11 @@ fun VerticalIconSizeSlider(
                                     val height = size.height.toFloat()
                                     val fraction = 1f - (y / height).coerceIn(0f, 1f)
                                     val newValue = (minValue + fraction * (effectiveMax - minValue)).coerceIn(minValue, effectiveMax)
+                                    dragValue = newValue  // synchronous — the release reads this
                                     coroutineScope.launch {
                                         animatedValue.snapTo(newValue)
                                     }
-                                    onSizeChange(newValue)
+                                    currentOnSizeChange(newValue)
                                 }
                             }
                         )
@@ -369,6 +362,9 @@ fun BottomColumnsSlider(
     // Track if user is currently dragging
     var isDragging by remember { mutableStateOf(false) }
     var isDragOnThumb by remember { mutableStateOf(false) }  // Only drag if started on thumb
+    // Finger value, set synchronously for the release — animatedValue lags when busy (issue #118).
+    var dragValue by remember { mutableFloatStateOf(currentSize) }
+    var downX by remember { mutableFloatStateOf(0f) }  // touch-down point for the thumb hit test
 
     // Sync animated value with external changes (e.g., linked slider); animate when not dragging.
     LaunchedEffect(currentSize) {
@@ -383,8 +379,8 @@ fun BottomColumnsSlider(
         }
     }
 
-    // Calculate thumb position for use in both wrapper Box and inner BoxWithConstraints
-    val thumbFraction = (animatedValue.value - minValue) / (maxValue - minValue)
+    // Thumb position for both boxes, clamped so out-of-range values stay on the track (issue #118)
+    val thumbFraction = ((animatedValue.value - minValue) / (maxValue - minValue)).coerceIn(0f, 1f)
 
     Column(modifier = Modifier.fillMaxWidth()) {
         // Wrapper Box to allow touch indicator overflow
@@ -399,13 +395,14 @@ fun BottomColumnsSlider(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(32.dp)
+                    .onEachDown { downX = it.x }
                     .pointerInput(Unit) {
                     detectDragGestures(
-                        onDragStart = { offset ->
-                            val x = offset.x
+                        onDragStart = { _ ->
+                            val x = downX
                             val width = size.width.toFloat()
                             // Compute thumb position from current animated value (not stale captured thumbFraction)
-                            val currentThumbFraction = (animatedValue.value - minValue) / (maxValue - minValue)
+                            val currentThumbFraction = ((animatedValue.value - minValue) / (maxValue - minValue)).coerceIn(0f, 1f)
                             val currentThumbX = currentThumbFraction * width
                             val thumbTouchRadius = 48.dp.toPx()  // Touch area around thumb
 
@@ -413,6 +410,7 @@ fun BottomColumnsSlider(
                             if (kotlin.math.abs(x - currentThumbX) <= thumbTouchRadius) {
                                 isDragging = true
                                 isDragOnThumb = true
+                                dragValue = animatedValue.value
                             } else {
                                 isDragOnThumb = false
                             }
@@ -421,12 +419,13 @@ fun BottomColumnsSlider(
                             if (isDragOnThumb) {
                                 // Calculate snapped value immediately
                                 val snappedValue = tickValues.minByOrNull {
-                                    kotlin.math.abs(it - animatedValue.value)
-                                }?.toFloat() ?: animatedValue.value
+                                    kotlin.math.abs(it - dragValue)
+                                }?.toFloat() ?: dragValue
                                 // Update parent state with snapped value first
                                 onSizeChange(snappedValue)
                                 // Then animate to snapped position
                                 coroutineScope.launch {
+                                    animatedValue.snapTo(dragValue) // catch up with the finger first
                                     animatedValue.animateTo(
                                         targetValue = snappedValue,
                                         animationSpec = spring(
@@ -444,12 +443,13 @@ fun BottomColumnsSlider(
                             if (isDragOnThumb) {
                                 // Calculate snapped value immediately
                                 val snappedValue = tickValues.minByOrNull {
-                                    kotlin.math.abs(it - animatedValue.value)
-                                }?.toFloat() ?: animatedValue.value
+                                    kotlin.math.abs(it - dragValue)
+                                }?.toFloat() ?: dragValue
                                 // Update parent state with snapped value first
                                 onSizeChange(snappedValue)
                                 // Then animate to snapped position
                                 coroutineScope.launch {
+                                    animatedValue.snapTo(dragValue)
                                     animatedValue.animateTo(
                                         targetValue = snappedValue,
                                         animationSpec = spring(
@@ -469,6 +469,7 @@ fun BottomColumnsSlider(
                                 val width = size.width.toFloat()
                                 val fraction = (x / width).coerceIn(0f, 1f)
                                 val newValue = (minValue + fraction * (maxValue - minValue)).coerceIn(minValue, maxValue)
+                                dragValue = newValue  // synchronous — the release reads this
                                 coroutineScope.launch {
                                     animatedValue.snapTo(newValue)
                                 }

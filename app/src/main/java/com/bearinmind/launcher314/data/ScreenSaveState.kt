@@ -714,6 +714,18 @@ fun setExtendedGridSize(context: Context, enabled: Boolean) {
     prefs.edit().putBoolean(KEY_EXTENDED_GRID_SIZE, enabled).apply()
 }
 
+/** Clamps values left by a switched-off Extended toggle to the normal slider maxima (issue #118). */
+fun clampToNormalRanges(context: Context) {
+    if (!getExtendedGridSize(context)) {
+        if (getGridSize(context) > 7) setGridSize(context, 7)
+        if (getDrawerGridRows(context) > 8) setDrawerGridRows(context, 8)
+        if (getHomeGridSize(context) > 7) setHomeGridSize(context, 7)
+        if (getHomeGridRows(context) > 8) setHomeGridRows(context, 8)
+        if (getDockColumns(context) > 7) setDockColumns(context, 7)
+    }
+    if (!getExtendedIconSizes(context) && getDrawerIconSizePercent(context) > 125) setDrawerIconSizePercent(context, 125)
+}
+
 // EXPERIMENTAL (issue #102): tint the launcher accent with the wallpaper's color (Monet on 12+, WallpaperColors on 8.1+).
 private const val KEY_WALLPAPER_ACCENT = "experimental_wallpaper_accent"
 

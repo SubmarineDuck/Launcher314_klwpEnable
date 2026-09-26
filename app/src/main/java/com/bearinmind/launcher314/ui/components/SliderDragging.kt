@@ -4,6 +4,8 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -19,6 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -30,6 +33,11 @@ import kotlin.math.roundToInt
 
 /** Touch radius around the thumb — drags must start within this distance of it. */
 private val THUMB_TOUCH_RADIUS = 48.dp
+
+/** Reports each gesture's touch-down point; onDragStart's slop point can land far off the thumb when the UI is busy (issue #118). */
+internal fun Modifier.onEachDown(onDown: (Offset) -> Unit): Modifier = pointerInput(Unit) {
+    awaitEachGesture { onDown(awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial).position) }
+}
 
 /** Configuration for a horizontal thumb-drag-only slider. */
 data class HorizontalSliderConfig(
@@ -64,15 +72,9 @@ fun ThumbDragHorizontalSlider(
     onValueChangeFinished: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
-    overflowThreshold: Float = config.maxValue, // above this value, track/thumb turns red and snaps back
+    overflowThreshold: Float = config.maxValue, // above this value, track/thumb turns red (warning only)
     onDoubleTap: (() -> Unit)? = null // optional double-tap to reset
 ) {
-    // Cap at highest usable snap value (below overflow threshold); extended icon sizes (issue #50) drag through the red and keep the value.
-    val extendedCtx = androidx.compose.ui.platform.LocalContext.current
-    val extendedSizes = remember { com.bearinmind.launcher314.data.getExtendedIconSizes(extendedCtx) }
-    val dragMax = if (extendedSizes || overflowThreshold >= config.maxValue) config.maxValue
-        else config.snapTickValues.filter { it.toFloat() <= overflowThreshold }.maxOrNull()?.toFloat() ?: config.minValue
-
     val animatedValue = remember { Animatable(currentValue) }
     // Synchronous drag value — avoids one-frame lag from coroutineScope.launch { snapTo }
     var dragValue by remember { mutableFloatStateOf(currentValue) }
@@ -80,7 +82,7 @@ fun ThumbDragHorizontalSlider(
     var isDragging by remember { mutableStateOf(false) }
     var isDragOnThumb by remember { mutableStateOf(false) }
     var isPressed by remember { mutableStateOf(false) }
-    var isOverflowSnapping by remember { mutableStateOf(false) }
+    var downX by remember { mutableFloatStateOf(0f) }  // touch-down point for the thumb hit test
 
     // rememberUpdatedState prevents stale capture inside pointerInput(Unit)
     val currentOnValueChange by rememberUpdatedState(onValueChange)
@@ -93,7 +95,7 @@ fun ThumbDragHorizontalSlider(
     val disabledTextColor = Color(0xFF3A3A3A)
 
     LaunchedEffect(currentValue) {
-        if (!isDragging && !isOverflowSnapping) {
+        if (!isDragging) {
             dragValue = currentValue
             animatedValue.animateTo(
                 targetValue = currentValue,
@@ -133,7 +135,7 @@ fun ThumbDragHorizontalSlider(
                             detectTapGestures(
                                 onPress = { offset ->
                                     val currentThumbFraction =
-                                        (animatedValue.value - config.minValue) / (config.maxValue - config.minValue)
+                                        ((animatedValue.value - config.minValue) / (config.maxValue - config.minValue)).coerceIn(0f, 1f)
                                     val currentThumbX = currentThumbFraction * size.width.toFloat()
                                     val hitThumb =
                                         kotlin.math.abs(offset.x - currentThumbX) <= THUMB_TOUCH_RADIUS.toPx()
@@ -144,7 +146,7 @@ fun ThumbDragHorizontalSlider(
                                 },
                                 onDoubleTap = { offset ->
                                     val currentThumbFraction =
-                                        (animatedValue.value - config.minValue) / (config.maxValue - config.minValue)
+                                        ((animatedValue.value - config.minValue) / (config.maxValue - config.minValue)).coerceIn(0f, 1f)
                                     val currentThumbX = currentThumbFraction * size.width.toFloat()
                                     val hitThumb =
                                         kotlin.math.abs(offset.x - currentThumbX) <= THUMB_TOUCH_RADIUS.toPx()
@@ -153,13 +155,15 @@ fun ThumbDragHorizontalSlider(
                             )
                         } else Modifier
                     )
-                    .pointerInput(enabled, overflowThreshold) {
+                    .onEachDown { downX = it.x }
+                    .pointerInput(enabled, config) {
                         if (!enabled) return@pointerInput
                         detectHorizontalDragGestures(
-                            onDragStart = { offset: Offset ->
-                                val x = offset.x
+                            onDragStart = { _: Offset ->
+                                val x = downX
                                 val width = size.width.toFloat()
-                                val currentThumbFraction = (animatedValue.value - config.minValue) / (config.maxValue - config.minValue)
+                                // Clamped like the drawn thumb so out-of-range values stay grabbable (issue #118).
+                                val currentThumbFraction = ((animatedValue.value - config.minValue) / (config.maxValue - config.minValue)).coerceIn(0f, 1f)
                                 val currentThumbX = currentThumbFraction * width
                                 val thumbTouchRadius = THUMB_TOUCH_RADIUS.toPx()
 
@@ -172,12 +176,10 @@ fun ThumbDragHorizontalSlider(
                             },
                             onDragEnd = {
                                 if (isDragOnThumb) {
-                                    val validSnaps = config.snapTickValues.filter { it.toFloat() <= dragMax }
-                                    val snappedValue = validSnaps.minByOrNull {
+                                    // Nearest tick; the red zone is a warning only (issue #118).
+                                    val snappedValue = config.snapTickValues.minByOrNull {
                                         kotlin.math.abs(it - dragValue)
-                                    }?.toFloat() ?: dragMax
-                                    val wasInOverflow = dragValue > dragMax
-                                    if (wasInOverflow) isOverflowSnapping = true
+                                    }?.toFloat() ?: dragValue
                                     currentOnValueChange(snappedValue)
                                     currentOnValueChangeFinished()
                                     coroutineScope.launch {
@@ -186,26 +188,19 @@ fun ThumbDragHorizontalSlider(
                                         isDragOnThumb = false
                                         animatedValue.animateTo(
                                             targetValue = snappedValue,
-                                            animationSpec = if (wasInOverflow) spring(
-                                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                stiffness = 300f
-                                            ) else spring(
+                                            animationSpec = spring(
                                                 dampingRatio = Spring.DampingRatioMediumBouncy,
                                                 stiffness = Spring.StiffnessMedium
                                             )
                                         )
-                                        isOverflowSnapping = false
                                     }
                                 }
                             },
                             onDragCancel = {
                                 if (isDragOnThumb) {
-                                    val validSnaps = config.snapTickValues.filter { it.toFloat() <= dragMax }
-                                    val snappedValue = validSnaps.minByOrNull {
+                                    val snappedValue = config.snapTickValues.minByOrNull {
                                         kotlin.math.abs(it - dragValue)
-                                    }?.toFloat() ?: dragMax
-                                    val wasInOverflow = dragValue > dragMax
-                                    if (wasInOverflow) isOverflowSnapping = true
+                                    }?.toFloat() ?: dragValue
                                     currentOnValueChange(snappedValue)
                                     currentOnValueChangeFinished()
                                     coroutineScope.launch {
@@ -214,15 +209,11 @@ fun ThumbDragHorizontalSlider(
                                         isDragOnThumb = false
                                         animatedValue.animateTo(
                                             targetValue = snappedValue,
-                                            animationSpec = if (wasInOverflow) spring(
-                                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                stiffness = 300f
-                                            ) else spring(
+                                            animationSpec = spring(
                                                 dampingRatio = Spring.DampingRatioMediumBouncy,
                                                 stiffness = Spring.StiffnessMedium
                                             )
                                         )
-                                        isOverflowSnapping = false
                                     }
                                 }
                             },
@@ -438,20 +429,20 @@ fun ThumbDragVerticalSlider(
     modifier: Modifier = Modifier,
     overflowThreshold: Float = 125f  // above this value, track/thumb turns red (visual warning only)
 ) {
-    // Cap at highest usable snap below the overflow threshold; extended icon sizes (issue #50) drag through the red and keep the value.
-    val extendedCtxV = androidx.compose.ui.platform.LocalContext.current
-    val extendedSizesV = remember { com.bearinmind.launcher314.data.getExtendedIconSizes(extendedCtxV) }
-    val dragMax = if (extendedSizesV || overflowThreshold >= config.maxValue) config.maxValue
-        else config.snapTickValues.filter { it.toFloat() <= overflowThreshold }.maxOrNull()?.toFloat() ?: config.minValue
     val clampedValue = currentValue.coerceIn(config.minValue, config.maxValue)
     val animatedValue = remember { Animatable(clampedValue) }
     val coroutineScope = rememberCoroutineScope()
     var isDragging by remember { mutableStateOf(false) }
     var isDragOnThumb by remember { mutableStateOf(false) }
-    var isOverflowSnapping by remember { mutableStateOf(false) }
+    // Finger value, set synchronously for the release — animatedValue lags when busy (issue #118).
+    var dragValue by remember { mutableFloatStateOf(clampedValue) }
+    var downY by remember { mutableFloatStateOf(0f) }  // touch-down point for the thumb hit test
+    // Fresh callbacks without re-keying pointerInput — a restart kills the drag (issue #118).
+    val currentOnValueChange by rememberUpdatedState(onValueChange)
+    val currentOnValueChangeFinished by rememberUpdatedState(onValueChangeFinished)
 
     LaunchedEffect(clampedValue) {
-        if (!isDragging && !isOverflowSnapping) {
+        if (!isDragging) {
             animatedValue.animateTo(
                 targetValue = clampedValue,
                 animationSpec = spring(
@@ -515,10 +506,11 @@ fun ThumbDragVerticalSlider(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .pointerInput(overflowThreshold) { // Rebuild when threshold changes
+                    .onEachDown { downY = it.y }
+                    .pointerInput(config) {
                         detectDragGestures(
-                            onDragStart = { offset: Offset ->
-                                val y = offset.y
+                            onDragStart = { _: Offset ->
+                                val y = downY
                                 val height = size.height.toFloat()
                                 // Recalculate thumb position using current animated value (not captured thumbFraction)
                                 val currentThumbFraction = (1f - (animatedValue.value - config.minValue) / (config.maxValue - config.minValue)).coerceIn(0f, 1f)
@@ -528,33 +520,28 @@ fun ThumbDragVerticalSlider(
                                 if (kotlin.math.abs(y - currentThumbY) <= thumbTouchRadius) {
                                     isDragging = true
                                     isDragOnThumb = true
+                                    dragValue = animatedValue.value
                                 } else {
                                     isDragOnThumb = false
                                 }
                             },
                             onDragEnd = {
                                 if (isDragOnThumb) {
-                                    // Released from the red overflow zone: bouncy-spring back to the nearest valid tick.
-                                    val validSnaps = config.snapTickValues.filter { it.toFloat() <= dragMax }
-                                    val snappedValue = validSnaps.minByOrNull {
-                                        kotlin.math.abs(it - animatedValue.value)
-                                    }?.toFloat() ?: dragMax
-                                    val wasInOverflow = animatedValue.value > dragMax
-                                    if (wasInOverflow) isOverflowSnapping = true
-                                    onValueChange(snappedValue)
-                                    onValueChangeFinished()
+                                    // Nearest tick; the red zone is a warning only (issue #118).
+                                    val snappedValue = config.snapTickValues.minByOrNull {
+                                        kotlin.math.abs(it - dragValue)
+                                    }?.toFloat() ?: dragValue
+                                    currentOnValueChange(snappedValue)
+                                    currentOnValueChangeFinished()
                                     coroutineScope.launch {
+                                        animatedValue.snapTo(dragValue) // catch up with the finger first
                                         animatedValue.animateTo(
                                             targetValue = snappedValue,
-                                            animationSpec = if (wasInOverflow) spring(
-                                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                stiffness = 300f
-                                            ) else spring(
+                                            animationSpec = spring(
                                                 dampingRatio = Spring.DampingRatioMediumBouncy,
                                                 stiffness = Spring.StiffnessMedium
                                             )
                                         )
-                                        isOverflowSnapping = false
                                     }
                                 }
                                 isDragging = false
@@ -562,26 +549,20 @@ fun ThumbDragVerticalSlider(
                             },
                             onDragCancel = {
                                 if (isDragOnThumb) {
-                                    // Same snap-back as onDragEnd (a cancel can carry the release).
-                                    val validSnaps = config.snapTickValues.filter { it.toFloat() <= dragMax }
-                                    val snappedValue = validSnaps.minByOrNull {
-                                        kotlin.math.abs(it - animatedValue.value)
-                                    }?.toFloat() ?: dragMax
-                                    val wasInOverflow = animatedValue.value > dragMax
-                                    if (wasInOverflow) isOverflowSnapping = true
-                                    onValueChange(snappedValue)
+                                    // Same snap as onDragEnd (a cancel can carry the release).
+                                    val snappedValue = config.snapTickValues.minByOrNull {
+                                        kotlin.math.abs(it - dragValue)
+                                    }?.toFloat() ?: dragValue
+                                    currentOnValueChange(snappedValue)
                                     coroutineScope.launch {
+                                        animatedValue.snapTo(dragValue)
                                         animatedValue.animateTo(
                                             targetValue = snappedValue,
-                                            animationSpec = if (wasInOverflow) spring(
-                                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                stiffness = 300f
-                                            ) else spring(
+                                            animationSpec = spring(
                                                 dampingRatio = Spring.DampingRatioMediumBouncy,
                                                 stiffness = Spring.StiffnessMedium
                                             )
                                         )
-                                        isOverflowSnapping = false
                                     }
                                 }
                                 isDragging = false
@@ -595,8 +576,9 @@ fun ThumbDragVerticalSlider(
                                     val fraction = 1f - (y / height).coerceIn(0f, 1f)
                                     val newValue = (config.minValue + fraction * (config.maxValue - config.minValue))
                                         .coerceIn(config.minValue, config.maxValue)
+                                    dragValue = newValue  // synchronous — the release reads this
                                     coroutineScope.launch { animatedValue.snapTo(newValue) }
-                                    onValueChange(newValue)
+                                    currentOnValueChange(newValue)
                                 }
                             }
                         )

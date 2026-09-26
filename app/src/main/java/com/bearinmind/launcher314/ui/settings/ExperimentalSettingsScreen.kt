@@ -57,6 +57,7 @@ import com.bearinmind.launcher314.data.getHomeOuterMarginPercent
 import com.bearinmind.launcher314.data.getOuterMarginsEnabled
 import com.bearinmind.launcher314.data.setExtendedGridSize
 import com.bearinmind.launcher314.data.setExtendedIconSizes
+import com.bearinmind.launcher314.data.clampToNormalRanges
 import com.bearinmind.launcher314.data.getWallpaperAccentEnabled
 import com.bearinmind.launcher314.data.setHomeOuterMarginPercent
 import com.bearinmind.launcher314.data.setOuterMarginsEnabled
@@ -103,6 +104,7 @@ fun ExperimentalSettingsScreen(onBack: () -> Unit) {
                 onCheckedChange = {
                     extendedIcons = it
                     setExtendedIconSizes(context, it)
+                    clampToNormalRanges(context)
                 }
             )
             SettingsToggleItem(
@@ -112,6 +114,7 @@ fun ExperimentalSettingsScreen(onBack: () -> Unit) {
                 onCheckedChange = {
                     extendedGrid = it
                     setExtendedGridSize(context, it)
+                    clampToNormalRanges(context)
                 }
             )
             var folderAutoSize by remember { mutableStateOf(getFolderAutoSizeEnabled(context)) }

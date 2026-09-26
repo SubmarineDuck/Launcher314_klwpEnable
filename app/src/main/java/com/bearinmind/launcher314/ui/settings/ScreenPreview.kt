@@ -178,6 +178,31 @@ sealed class PreviewItem {
     data class AppItem(val app: PreviewAppInfo) : PreviewItem()
 }
 
+/** Grid values shared by both always-composed tabs so the icon-size warning stays live (issue #118). */
+@Stable
+class PreviewGridState(context: Context) {
+    var drawerColumns by mutableFloatStateOf(getGridSize(context).toFloat())
+    var drawerPaged by mutableStateOf(getDrawerPagedMode(context))
+    var homeColumns by mutableFloatStateOf(getHomeGridSize(context).toFloat())
+    var homeRows by mutableFloatStateOf(getHomeGridRows(context).toFloat())
+}
+
+/** Largest icon % that fits both drawer and home cells; the icon sliders turn red above it. */
+fun iconOverflowThreshold(context: Context, configuration: android.content.res.Configuration, grid: PreviewGridState): Float {
+    val swDp = configuration.screenWidthDp.toFloat()
+    val shDp = configuration.screenHeightDp.toFloat()
+    val iconRef = swDp / 4f * 0.55f  // icon dp at 100%
+    val drawerHPad = if (grid.drawerPaged) 16f else 28f
+    val drawerCellWidth = (swDp - drawerHPad) / grid.drawerColumns.roundToInt()
+    val drawerThreshold = ((drawerCellWidth - 16f) / iconRef * 100f).coerceIn(50f, 125f)
+    val homeHPad = swDp * com.bearinmind.launcher314.data.homeGridHPadFactor(context)
+    val homeCellWidth = (swDp - homeHPad * 2) / grid.homeColumns.roundToInt()
+    val homeCellBasis = minOf(homeCellWidth, (shDp - 76f - swDp * 0.022f * 2) / grid.homeRows.roundToInt())
+    val homeMarkerPadding = homeCellBasis * 0.073f * 2f
+    val homeThreshold = ((homeCellWidth - homeMarkerPadding) / iconRef * 100f).coerceIn(50f, 125f)
+    return minOf(drawerThreshold, homeThreshold)
+}
+
 /**
  * Complete preview grid section with sliders and controls
  */
@@ -197,19 +222,20 @@ fun AppDrawerPreviewSection(
     iconBgColorOverride: Int? = null,
     iconBgIntensityOverride: Int = 100,
     onEditDrawerSettingsClick: () -> Unit = {},
-    onManageTabsClick: () -> Unit = {}
+    onManageTabsClick: () -> Unit = {},
+    previewGrid: PreviewGridState
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // State for the sliders - will be synced with SharedPreferences
-    var currentGridSize by remember { mutableFloatStateOf(getGridSize(context).toFloat()) }
+    // State for the sliders - will be synced with SharedPreferences (grid values shared via previewGrid)
+    var currentGridSize by previewGrid::drawerColumns
     var currentIconSizePercent by remember { mutableFloatStateOf(getDrawerIconSizePercent(context).toFloat()) }
     // var isLinked by remember { mutableStateOf(getSizeLinked(context)) }
     val isLinked = false // Link button hidden — keep variable for minimal code changes
     var drawerTransparency by remember { mutableFloatStateOf(getDrawerTransparency(context).toFloat()) }
     var drawerGridRows by remember { mutableFloatStateOf(getDrawerGridRows(context).toFloat()) }
-    var isPagedMode by remember { mutableStateOf(getDrawerPagedMode(context)) }
+    var isPagedMode by previewGrid::drawerPaged
     var selectedFontFamily by remember { mutableStateOf(FontManager.getSelectedFontFamily(context)) }
     var hideSearchBar by remember { mutableStateOf(getHideDrawerSearchBar(context)) }
 
@@ -328,43 +354,8 @@ fun AppDrawerPreviewSection(
     val configuration = LocalConfiguration.current
     val previewHeight = (maxOf(configuration.screenWidthDp, configuration.screenHeightDp) * 0.4f).dp
 
-    // Compute UNIVERSAL overflow threshold — min of drawer and home screen thresholds
-    // Icon formula: screenWidth / 4 * 0.55 * pct/100
-    val universalOverflowThreshold = run {
-        val swDp = configuration.screenWidthDp.toFloat()
-        val shDp = configuration.screenHeightDp.toFloat()
-        val iconRef = swDp / 4f * 0.55f  // icon dp at 100%
-
-        // Drawer threshold
-        val gridSizeInt = currentGridSize.roundToInt()
-        val drawerHPad = if (isPagedMode) 16f else 28f
-        val drawerCellWidth = (swDp - drawerHPad) / gridSizeInt
-        val drawerThreshold = ((drawerCellWidth - 16f) / iconRef * 100f).coerceIn(50f, 125f)
-
-        // Home screen threshold (read stored settings)
-        val homeGridCols = getHomeGridSize(context)
-        val homeGridRows = getHomeGridRows(context)
-        val homeHPad = swDp * com.bearinmind.launcher314.data.homeGridHPadFactor(context)
-        val homeCellWidth = (swDp - homeHPad * 2) / homeGridCols
-        val homeCellBasis = minOf(homeCellWidth, (shDp - 76f - swDp * 0.022f * 2) / homeGridRows)
-        val homeMarkerPadding = homeCellBasis * 0.073f * 2f
-        val homeThreshold = ((homeCellWidth - homeMarkerPadding) / iconRef * 100f).coerceIn(50f, 125f)
-
-        minOf(drawerThreshold, homeThreshold)
-    }
-
-    // Auto-snap icon size down when threshold drops below current value — skipped with extended icon sizes (issue #50), where past-threshold values are deliberate.
-    LaunchedEffect(universalOverflowThreshold) {
-        if (!com.bearinmind.launcher314.data.getExtendedIconSizes(context) && currentIconSizePercent > universalOverflowThreshold) {
-            // Snap to highest usable value
-            val snapTicks = if (isLinked) listOf(67, 80, 100, 133).filter { it <= 125 } else (50..125 step 5).toList()
-            val maxSnap = snapTicks.filter { it.toFloat() <= universalOverflowThreshold }.maxOrNull()?.toFloat() ?: 50f
-            currentIconSizePercent = maxSnap
-            setDrawerIconSizePercent(context, maxSnap.roundToInt())
-            setHomeIconSizePercent(context, maxSnap.roundToInt())
-            onSharedIconSizeChanged(maxSnap)
-        }
-    }
+    // Red-zone line only; icons are never auto-shrunk (issue #118).
+    val universalOverflowThreshold = iconOverflowThreshold(context, configuration, previewGrid)
 
     // Preview section with sliders - grid layout
     Column(
@@ -1933,15 +1924,16 @@ fun HomeScreenPreviewSection(
     onSharedIconSizeChanged: (Float) -> Unit = {},
     iconShapeOverride: String? = null,
     iconBgColorOverride: Int? = null,
-    iconBgIntensityOverride: Int = 100
+    iconBgIntensityOverride: Int = 100,
+    previewGrid: PreviewGridState
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val coroutineScope = rememberCoroutineScope()
 
-    // Grid settings (columns x rows), dock columns, and icon size
-    var gridColumns by remember { mutableFloatStateOf(getHomeGridSize(context).toFloat()) }
-    var gridRows by remember { mutableFloatStateOf(getHomeGridRows(context).toFloat()) }
+    // Grid settings (columns x rows), dock columns, and icon size (columns/rows shared via previewGrid)
+    var gridColumns by previewGrid::homeColumns
+    var gridRows by previewGrid::homeRows
     var dockColumns by remember { mutableFloatStateOf(getDockColumns(context).toFloat()) }
     var isDockEnabled by remember { mutableStateOf(getDockEnabled(context)) }
     var dockPages by remember { mutableFloatStateOf(com.bearinmind.launcher314.data.getDockPages(context).toFloat()) }
@@ -2028,41 +2020,8 @@ fun HomeScreenPreviewSection(
     val configuration = LocalConfiguration.current
     val previewHeight = (maxOf(configuration.screenWidthDp, configuration.screenHeightDp) * 0.4f).dp
 
-    // Compute UNIVERSAL overflow threshold — min of home screen and drawer thresholds
-    // Icon formula: screenWidth / 4 * 0.55 * pct/100
-    val screenWidthDpVal = configuration.screenWidthDp.toFloat()
-    val screenHeightDpVal = configuration.screenHeightDp.toFloat()
-    val iconRef = screenWidthDpVal / 4f * 0.55f  // icon dp at 100%
-
-    val universalOverflowThreshold = run {
-        // Home screen threshold
-        val hPad = screenWidthDpVal * com.bearinmind.launcher314.data.homeGridHPadFactor(context)
-        val homeCellWidth = (screenWidthDpVal - hPad * 2) / gridColumns.roundToInt()
-        val cellBasis = minOf(homeCellWidth, (screenHeightDpVal - 76f - screenWidthDpVal * 0.022f * 2) / gridRows.roundToInt())
-        val markerPadding = cellBasis * 0.073f * 2f
-        val homeThreshold = ((homeCellWidth - markerPadding) / iconRef * 100f).coerceIn(50f, 125f)
-
-        // Drawer threshold (read stored settings)
-        val drawerGridSize = getGridSize(context)
-        val drawerPaged = getDrawerPagedMode(context)
-        val drawerHPad = if (drawerPaged) 16f else 28f
-        val drawerCellWidth = (screenWidthDpVal - drawerHPad) / drawerGridSize
-        val drawerThreshold = ((drawerCellWidth - 16f) / iconRef * 100f).coerceIn(50f, 125f)
-
-        minOf(homeThreshold, drawerThreshold)
-    }
-
-    // Auto-snap icon size down when threshold drops below current value — skipped with extended icon sizes (issue #50).
-    LaunchedEffect(universalOverflowThreshold) {
-        if (!com.bearinmind.launcher314.data.getExtendedIconSizes(context) && iconSizePercent > universalOverflowThreshold) {
-            val snapTicks = (50..125 step 5).toList()
-            val maxSnap = snapTicks.filter { it.toFloat() <= universalOverflowThreshold }.maxOrNull()?.toFloat() ?: 50f
-            iconSizePercent = maxSnap
-            setHomeIconSizePercent(context, maxSnap.roundToInt())
-            setDrawerIconSizePercent(context, maxSnap.roundToInt())
-            onSharedIconSizeChanged(maxSnap)
-        }
-    }
+    // Red-zone line only; icons are never auto-shrunk (issue #118).
+    val universalOverflowThreshold = iconOverflowThreshold(context, configuration, previewGrid)
 
     Column(
         modifier = Modifier
@@ -2267,7 +2226,7 @@ private fun HomeVerticalIconSizeSlider(
     onSizeChange: (Float) -> Unit,
     onSizeChangeFinished: () -> Unit
 ) {
-    // Experimental (issue #50): "Extended icon sizes" swaps in the 200% config with no drag cap.
+    // Experimental (issue #50): "Extended icon sizes" swaps in the 200% config.
     val extCtx = LocalContext.current
     val extended = remember { com.bearinmind.launcher314.data.getExtendedIconSizes(extCtx) }
     val config = if (extended) SliderConfigs.iconSizePercentExtended else SliderConfigs.iconSizePercent
