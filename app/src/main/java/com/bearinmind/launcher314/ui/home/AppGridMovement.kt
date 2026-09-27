@@ -352,6 +352,7 @@ fun DraggableGridCell(
     globalIconBgColor: Int? = null, // Global icon background color (drawn behind icon within shape)
     globalIconBgIntensity: Int = 100, // Triggers recomposition when intensity changes
     removeLabel: String = "Remove from home",
+    labelColor: Color = Color.Unspecified, // folder popups pass their card text color
     homeFolders: List<com.bearinmind.launcher314.data.HomeFolder> = emptyList(),
     onAddToFolder: (com.bearinmind.launcher314.data.HomeFolder) -> Unit = {},
     onCreateFolder: () -> Unit = {},
@@ -469,7 +470,7 @@ fun DraggableGridCell(
                 Text(
                     text = "+",
                     fontSize = plusMarkerFontSize,
-                    color = Color.White.copy(alpha = 0.5f)
+                    color = (if (labelColor != Color.Unspecified) labelColor else Color.White).copy(alpha = 0.5f)
                 )
             }
         }
@@ -1009,7 +1010,7 @@ fun DraggableGridCell(
                             val perAppLabelColor = if (customization?.labelColor != null) {
                                 val i = (customization.labelColorIntensity ?: 100) / 100f
                                 Color(customization.labelColor).copy(alpha = i.coerceIn(0f, 1f))
-                            } else com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current
+                            } else if (labelColor != Color.Unspecified) labelColor else com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current
                             Text(
                                 text = displayLabel,
                                 fontSize = perAppFontSize,
@@ -1103,7 +1104,7 @@ fun DraggableGridCell(
                                     text = "Folder",
                                     fontSize = appNameFontSize,
                                     fontFamily = appNameFontFamily ?: FontFamily.Default,
-                                    color = com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current,
+                                    color = if (labelColor != Color.Unspecified) labelColor else com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     textAlign = TextAlign.Center,
@@ -1798,7 +1799,7 @@ fun DraggableGridCell(
                             val folderLabelColor = if (folderCustomization?.labelColor != null) {
                                 val i = (folderCustomization.labelColorIntensity ?: 100) / 100f
                                 Color(folderCustomization.labelColor).copy(alpha = i.coerceIn(0f, 1f))
-                            } else com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current
+                            } else if (labelColor != Color.Unspecified) labelColor else com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current
                             Text(
                                 text = folderDisplayName,
                                 fontSize = folderFontSize,

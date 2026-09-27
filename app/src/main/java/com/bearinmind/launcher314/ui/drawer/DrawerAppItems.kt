@@ -1247,6 +1247,7 @@ internal fun SelectableAppItem(
     Box {
         Column(
             modifier = Modifier
+                .fillMaxWidth() // centers the icon when labels are hidden (issue #119)
                 .wrapContentHeight(unbounded = true)
                 .then(
                     if (dragEnabled) {

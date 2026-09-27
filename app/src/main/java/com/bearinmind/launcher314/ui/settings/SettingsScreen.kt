@@ -143,6 +143,9 @@ fun SettingsScreen(
     var sharedIconSizePercent by remember { mutableFloatStateOf(getDrawerIconSizePercent(context).toFloat()) }
     // Grid values shared by both previews for the icon-size warning (issue #118)
     val previewGrid = remember { PreviewGridState(context) }
+    // Live "Hide text" per surface, for the previews
+    var homeLabelsHidden by remember { mutableStateOf(com.bearinmind.launcher314.data.getHideIconText(context)) }
+    var drawerLabelsHidden by remember { mutableStateOf(com.bearinmind.launcher314.data.getHideIconTextDrawer(context)) }
     var globalIconShape by remember { mutableStateOf(getGlobalIconShape(context)) }
     var globalIconBgColor by remember { mutableStateOf(getGlobalIconBgColor(context)) }
     var globalIconBgIntensity by remember { mutableStateOf(getGlobalIconBgIntensity(context)) }
@@ -282,7 +285,8 @@ fun SettingsScreen(
                         iconBgIntensityOverride = globalIconBgIntensity,
                         onEditDrawerSettingsClick = onEditDrawerSettingsClick,
                         onManageTabsClick = onManageTabsClick,
-                        previewGrid = previewGrid
+                        previewGrid = previewGrid,
+                        hideLabels = drawerLabelsHidden
                     )
                 }
 
@@ -302,7 +306,8 @@ fun SettingsScreen(
                         iconShapeOverride = globalIconShape,
                         iconBgColorOverride = globalIconBgColor,
                         iconBgIntensityOverride = globalIconBgIntensity,
-                        previewGrid = previewGrid
+                        previewGrid = previewGrid,
+                        hideLabels = homeLabelsHidden
                     )
                 }
 
@@ -337,6 +342,10 @@ fun SettingsScreen(
                             globalIconBgIntensity = intensity
                             setGlobalIconBgIntensity(context, intensity)
                             clearBgColorShapedIcons(context)
+                        },
+                        onHideTextChanged = {
+                            homeLabelsHidden = com.bearinmind.launcher314.data.getHideIconText(context)
+                            drawerLabelsHidden = com.bearinmind.launcher314.data.getHideIconTextDrawer(context)
                         }
                     )
                 }
@@ -778,7 +787,8 @@ fun IconTextPersonalizationCard(
     globalIconBgColor: Int? = null,
     onGlobalIconBgColorChanged: (Int?) -> Unit = {},
     globalIconBgIntensity: Int = 100,
-    onGlobalIconBgIntensityChanged: (Int) -> Unit = {}
+    onGlobalIconBgIntensityChanged: (Int) -> Unit = {},
+    onHideTextChanged: () -> Unit = {}  // lets the previews follow "Hide text"
 ) {
     val context = LocalContext.current
     // Re-read on every recomposition so it updates when returning from FontsScreen/IconPacksScreen
@@ -866,6 +876,7 @@ fun IconTextPersonalizationCard(
                         } else {
                             hideIconText = checked
                             com.bearinmind.launcher314.data.setHideIconText(context, checked)
+                            onHideTextChanged()
                         }
                     },
                     modifier = Modifier.offset(x = 10.dp),
@@ -932,6 +943,7 @@ fun IconTextPersonalizationCard(
                                     drawerHideText = pickDrawer
                                     com.bearinmind.launcher314.data.setHideIconText(context, pickHome)
                                     com.bearinmind.launcher314.data.setHideIconTextDrawer(context, pickDrawer)
+                                    onHideTextChanged()
                                     showLabelScope = false
                                 },
                                 shape = RoundedCornerShape(12.dp),

@@ -6,6 +6,9 @@ import androidx.compose.ui.graphics.Color
 /** Composition local for the global label text color. Default is White. */
 val LocalLabelTextColor = compositionLocalOf { Color.White }
 
+/** Home folder card text (title, menu, names): custom label color if set, else contrast with the card. */
+val LocalFolderCardTextColor = compositionLocalOf { Color.White }
+
 /** Composition local for the folder border color. Default is White at 30% alpha. */
 val LocalFolderBorderColor = compositionLocalOf { Color.White.copy(alpha = 0.3f) }
 

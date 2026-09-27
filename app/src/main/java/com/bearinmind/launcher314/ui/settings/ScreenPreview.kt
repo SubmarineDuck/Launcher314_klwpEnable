@@ -223,7 +223,8 @@ fun AppDrawerPreviewSection(
     iconBgIntensityOverride: Int = 100,
     onEditDrawerSettingsClick: () -> Unit = {},
     onManageTabsClick: () -> Unit = {},
-    previewGrid: PreviewGridState
+    previewGrid: PreviewGridState,
+    hideLabels: Boolean = false  // live drawer "Hide text"
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -374,6 +375,8 @@ fun AppDrawerPreviewSection(
                     .weight(1f)
                     .padding(start = 16.dp)
             ) {
+                val installedPackages = remember(previewApps) { previewApps.map { it.packageName }.toSet() }
+                CompositionLocalProvider(com.bearinmind.launcher314.ui.theme.LocalHideIconText provides hideLabels) {
                 RealAppDrawerPreview(
                     items = previewItems,
                     gridSize = currentGridSize.roundToInt(),
@@ -393,8 +396,10 @@ fun AppDrawerPreviewSection(
                     iconBgColorOverride = iconBgColorOverride,
                     iconBgIntensityOverride = iconBgIntensityOverride,
                     appCustomizations = appCustomizations,
-                    hideSearchBar = hideSearchBar
+                    hideSearchBar = hideSearchBar,
+                    installedPackages = installedPackages
                 )
+                }
             }
 
             // Vertical Icon Size Slider (50-125, red zone above overflow threshold)
@@ -767,6 +772,9 @@ fun DrawerPreviewCard(onPlayClick: () -> Unit = {}, hideSearchBar: Boolean = fal
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         contentAlignment = Alignment.Center
     ) {
+        val cardContext = LocalContext.current
+        val installedPackages = remember(previewApps) { previewApps.map { it.packageName }.toSet() }
+        CompositionLocalProvider(com.bearinmind.launcher314.ui.theme.LocalHideIconText provides com.bearinmind.launcher314.data.getHideIconTextDrawer(cardContext)) {
         RealAppDrawerPreview(
             items = previewItems,
             gridSize = gridSize,
@@ -788,8 +796,10 @@ fun DrawerPreviewCard(onPlayClick: () -> Unit = {}, hideSearchBar: Boolean = fal
             appCustomizations = appCustomizations,
             // Display-only here — let the settings page scroll under it.
             previewScrollEnabled = false,
-            hideSearchBar = hideSearchBar
+            hideSearchBar = hideSearchBar,
+            installedPackages = installedPackages
         )
+        }
     }
 }
 
@@ -870,6 +880,7 @@ fun HomePreviewCard(onPlayClick: () -> Unit = {}) {
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
         contentAlignment = Alignment.Center
     ) {
+        CompositionLocalProvider(com.bearinmind.launcher314.ui.theme.LocalHideIconText provides com.bearinmind.launcher314.data.getHideIconText(LocalContext.current)) {
         HomeScreenPreview(
             gridColumns = gridColumns,
             gridRows = gridRows,
@@ -890,6 +901,7 @@ fun HomePreviewCard(onPlayClick: () -> Unit = {}) {
             iconBgIntensityOverride = iconBgIntensity,
             appCustomizations = appCustomizations
         )
+        }
     }
 }
 
@@ -955,7 +967,9 @@ private fun RealAppDrawerPreview(
     // of the preview grabbing the gesture.
     previewScrollEnabled: Boolean = true,
     // Reflect the "Hide search bar" setting — drops the preview's search bar.
-    hideSearchBar: Boolean = false
+    hideSearchBar: Boolean = false,
+    // For tab chip counts matching the real drawer
+    installedPackages: Set<String> = emptySet()
 ) {
     val configuration = LocalConfiguration.current
     val screenWidth = configuration.screenWidthDp.dp
@@ -1174,12 +1188,17 @@ private fun RealAppDrawerPreview(
                 // Drawer tab chips (mirrors the real drawer's tab row) — shown
                 // whenever tabs are enabled, honoring counts / hide-(+) / alignment.
                 if (com.bearinmind.launcher314.ui.drawer.isDrawerTabsEnabled(drawerPreviewContext)) {
+                    // Same count as the real chip row (issue #104)
+                    val countFolders = remember { com.bearinmind.launcher314.data.loadDrawerData(drawerPreviewContext).folders }
+                    val countHidden = remember { com.bearinmind.launcher314.data.getHiddenApps(drawerPreviewContext) }
+                    val countPinned = remember { com.bearinmind.launcher314.data.getPinnedAppsOrder(drawerPreviewContext).toSet() }
                     PreviewDrawerTabChips(
                         tabs = com.bearinmind.launcher314.ui.drawer.loadDrawerTabs(drawerPreviewContext),
                         showCounts = com.bearinmind.launcher314.ui.drawer.isShowTabCounts(drawerPreviewContext),
                         hidePlus = com.bearinmind.launcher314.ui.drawer.isHidePlusChip(drawerPreviewContext),
                         alignment = com.bearinmind.launcher314.ui.drawer.getTabAlignment(drawerPreviewContext),
-                        scaleFactor = scaleFactor
+                        scaleFactor = scaleFactor,
+                        countOf = { t -> com.bearinmind.launcher314.ui.drawer.drawerTabVisibleCount(t, countFolders, installedPackages, countHidden, countPinned) }
                     )
                 }
 
@@ -1526,7 +1545,7 @@ private fun ScaledPreviewFolderItem(
 
             Spacer(modifier = Modifier.height(1.dp))
 
-            if (folderCustomization?.hideLabel != true) Text(
+            if (folderCustomization?.hideLabel != true && !com.bearinmind.launcher314.ui.theme.LocalHideIconText.current) Text(
                 text = folderCustomization?.customLabel ?: folder.name,
                 fontSize = fontSize,
                 fontFamily = fontFamily ?: FontFamily.Default,
@@ -1574,7 +1593,7 @@ private fun ScaledPreviewAppItem(
 ) {
     val markerHalfSize = 6.dp * scaleFactor
     val displayName = customization?.customLabel ?: app.name
-    val hideLabel = customization?.hideLabel == true
+    val hideLabel = customization?.hideLabel == true || com.bearinmind.launcher314.ui.theme.LocalHideIconText.current
     val customIconFile = customization?.customIconPath?.let { File(it) }?.takeIf { it.exists() }
     val perAppShape = getIconShape(customization?.iconShapeExp ?: customization?.iconShape)
     val effectiveClipShape = perAppShape ?: iconClipShape
@@ -1925,7 +1944,8 @@ fun HomeScreenPreviewSection(
     iconShapeOverride: String? = null,
     iconBgColorOverride: Int? = null,
     iconBgIntensityOverride: Int = 100,
-    previewGrid: PreviewGridState
+    previewGrid: PreviewGridState,
+    hideLabels: Boolean = false  // live home "Hide text"
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -2039,6 +2059,7 @@ fun HomeScreenPreviewSection(
                     .weight(1f)
                     .padding(start = 16.dp)
             ) {
+                CompositionLocalProvider(com.bearinmind.launcher314.ui.theme.LocalHideIconText provides hideLabels) {
                     HomeScreenPreview(
                         gridColumns = gridColumns.roundToInt(),
                         gridRows = gridRows.roundToInt(),
@@ -2059,6 +2080,7 @@ fun HomeScreenPreviewSection(
                         iconBgIntensityOverride = iconBgIntensityOverride,
                         appCustomizations = appCustomizations
                     )
+                }
             }
 
             // Vertical Icon Size Slider (50-125, red zone above overflow threshold)
@@ -2878,7 +2900,7 @@ private fun HomePreviewAppCell(
 ) {
     val cust = appCustomizations.customizations[cell.app.packageName]
     val displayName = cust?.customLabel ?: cell.app.name
-    val hideLabel = cust?.hideLabel == true
+    val hideLabel = cust?.hideLabel == true || com.bearinmind.launcher314.ui.theme.LocalHideIconText.current
     val customIconFile = cust?.customIconPath?.let { File(it) }?.takeIf { it.exists() }
     val perAppShape = getIconShape(cust?.iconShapeExp ?: cust?.iconShape)
     val cellClipShape = perAppShape ?: getIconShape(iconShapeOverride)
@@ -2991,7 +3013,7 @@ private fun HomePreviewFolderCell(
     // Folder: 2x2 mini-icon grid in a dark rounded box + name
     val folderCust = appCustomizations.customizations["folder_${cell.folder.id}"]
     val folderCustomLabel = folderCust?.customLabel
-    val folderHideLabel = folderCust?.hideLabel ?: false
+    val folderHideLabel = (folderCust?.hideLabel ?: false) || com.bearinmind.launcher314.ui.theme.LocalHideIconText.current
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -3266,7 +3288,8 @@ private fun PreviewDrawerTabChips(
     showCounts: Boolean,
     hidePlus: Boolean,
     alignment: Int,
-    scaleFactor: Float
+    scaleFactor: Float,
+    countOf: (com.bearinmind.launcher314.ui.drawer.DrawerTab) -> Int = { it.packages.size }
 ) {
     // Exact styling of DrawerTabRow's real TabChip, scaled down: pill shape,
     // 1dp onSurface@40% OUTLINE, transparent fill (selected = onSurface@12%),
@@ -3313,7 +3336,7 @@ private fun PreviewDrawerTabChips(
         chip("All", selected = true)
         // Cap at 3 tabs so the mini row can't overflow the preview width.
         tabs.take(3).forEach { t ->
-            chip(if (showCounts) "${t.name} (${t.packages.size})" else t.name, selected = false)
+            chip(if (showCounts) "${t.name} (${countOf(t)})" else t.name, selected = false)
         }
         if (!hidePlus) chip("+", selected = false)
     }

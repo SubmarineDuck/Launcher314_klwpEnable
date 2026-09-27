@@ -1207,6 +1207,7 @@ fun LauncherWithDrawer(
         val homeHideIconText = com.bearinmind.launcher314.data.getHideIconText(appCtx)
         androidx.compose.runtime.CompositionLocalProvider(
             com.bearinmind.launcher314.ui.theme.LocalLabelTextColor provides homeTextColor,
+            com.bearinmind.launcher314.ui.theme.LocalFolderCardTextColor provides (if (homeTextColorRaw != null) homeTextColor else androidx.compose.material3.MaterialTheme.colorScheme.onBackground),
             com.bearinmind.launcher314.ui.theme.LocalFolderBorderColor provides homeFolderBorder,
             com.bearinmind.launcher314.ui.theme.LocalHideIconText provides homeHideIconText
         ) {

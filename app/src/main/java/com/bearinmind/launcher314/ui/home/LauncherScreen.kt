@@ -7453,7 +7453,7 @@ fun LauncherScreen(
                         textStyle = TextStyle(
                             fontSize = 18.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current,
+                            color = com.bearinmind.launcher314.ui.theme.LocalFolderCardTextColor.current,
                             textAlign = TextAlign.Center
                         ),
                         singleLine = true,
@@ -7488,7 +7488,7 @@ fun LauncherScreen(
                         text = folder.name,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current,
+                        color = com.bearinmind.launcher314.ui.theme.LocalFolderCardTextColor.current,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
@@ -7512,7 +7512,7 @@ fun LauncherScreen(
                         Icon(
                             imageVector = Icons.Outlined.MoreVert,
                             contentDescription = "Folder options",
-                            tint = com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current
+                            tint = com.bearinmind.launcher314.ui.theme.LocalFolderCardTextColor.current
                         )
                     }
                     DropdownMenu(
@@ -7668,6 +7668,7 @@ fun LauncherScreen(
                                         iconTextSpacer = gridIconTextSpacer,
                                         hoverCornerRadius = gridHoverCornerRadius,
                                         removeLabel = "Remove from folder",
+                                        labelColor = com.bearinmind.launcher314.ui.theme.LocalFolderCardTextColor.current,
                                         onPositioned = { _, size ->
                                             if (cellIdx == 0) folderCellSize = size // one reference cell — see cellSize
                                         },

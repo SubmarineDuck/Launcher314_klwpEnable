@@ -112,6 +112,8 @@ internal fun FolderContentScreen(
     globalIconShapeName: String? = null
 ) {
     val context = LocalContext.current
+    // Folder card text: custom label color if set, else contrast with the card
+    val cardTextColor = if (com.bearinmind.launcher314.data.getGlobalTextColor(context) != null) com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current else MaterialTheme.colorScheme.onBackground
     val hapticFeedback = rememberHapticFeedback()
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
@@ -249,7 +251,7 @@ internal fun FolderContentScreen(
                     textStyle = androidx.compose.ui.text.TextStyle(
                         fontSize = 18.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.White,
+                        color = cardTextColor,
                         textAlign = TextAlign.Center
                     ),
                     singleLine = true,
@@ -273,7 +275,7 @@ internal fun FolderContentScreen(
                     text = folder.name,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White,
+                    color = cardTextColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
@@ -297,7 +299,7 @@ internal fun FolderContentScreen(
                     Icon(
                         imageVector = Icons.Outlined.MoreVert,
                         contentDescription = "Folder options",
-                        tint = Color.White
+                        tint = cardTextColor
                     )
                 }
                 DropdownMenu(
@@ -330,7 +332,7 @@ internal fun FolderContentScreen(
                 ) {
                     Text(
                         "Folder is empty",
-                        color = MaterialTheme.colorScheme.onBackground
+                        color = cardTextColor
                     )
                 }
             } else {
@@ -745,7 +747,7 @@ internal fun FolderContentScreen(
                                             modifier = Modifier
                                                 .size((iconSize * 1.25f).dp)
                                                 .graphicsLayer { alpha = ringAlpha }
-                                                .border(2.dp, Color.White.copy(alpha = 0.7f), RoundedCornerShape((iconSize * 0.36f).dp))
+                                                .border(2.dp, cardTextColor.copy(alpha = 0.7f), RoundedCornerShape((iconSize * 0.36f).dp))
                                         )
                                     }
 
@@ -768,7 +770,7 @@ internal fun FolderContentScreen(
                                             Text(
                                                 text = "+",
                                                 fontSize = plusMarkerFont,
-                                                color = Color.White.copy(alpha = 0.5f)
+                                                color = cardTextColor.copy(alpha = 0.5f)
                                             )
                                         }
                                     }
@@ -872,26 +874,28 @@ internal fun FolderContentScreen(
                                                         )
                                                     }
                                                 }
-                                                Spacer(modifier = Modifier.height(4.dp))
-                                                Text(
-                                                    text = cellApp.name,
-                                                    fontSize = labelFontSize,
-                                                    fontFamily = labelFontFamily ?: FontFamily.Default,
-                                                    color = com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    textAlign = TextAlign.Center,
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .graphicsLayer { alpha = cellLabelAlpha },
-                                                    style = MaterialTheme.typography.bodySmall.copy(
-                                                        shadow = androidx.compose.ui.graphics.Shadow(
-                                                            color = Color.Black,
-                                                            offset = Offset(1f, 1f),
-                                                            blurRadius = 3f
+                                                if (!com.bearinmind.launcher314.ui.theme.LocalHideIconText.current) { // honor Hide text
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Text(
+                                                        text = cellApp.name,
+                                                        fontSize = labelFontSize,
+                                                        fontFamily = labelFontFamily ?: FontFamily.Default,
+                                                        color = cardTextColor,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        textAlign = TextAlign.Center,
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .graphicsLayer { alpha = cellLabelAlpha },
+                                                        style = MaterialTheme.typography.bodySmall.copy(
+                                                            shadow = androidx.compose.ui.graphics.Shadow(
+                                                                color = Color.Black,
+                                                                offset = Offset(1f, 1f),
+                                                                blurRadius = 3f
+                                                            )
                                                         )
                                                     )
-                                                )
+                                                }
                                             }
                                         }
 
@@ -1021,26 +1025,28 @@ internal fun FolderContentScreen(
                                                         )
                                                     }
                                                 }
-                                                Spacer(modifier = Modifier.height(4.dp))
-                                                Text(
-                                                    text = cellSubFolder.name,
-                                                    fontSize = labelFontSize,
-                                                    fontFamily = labelFontFamily ?: FontFamily.Default,
-                                                    color = com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    textAlign = TextAlign.Center,
-                                                    modifier = Modifier
-                                                        .fillMaxWidth()
-                                                        .graphicsLayer { alpha = cellLabelAlpha },
-                                                    style = MaterialTheme.typography.bodySmall.copy(
-                                                        shadow = androidx.compose.ui.graphics.Shadow(
-                                                            color = Color.Black,
-                                                            offset = Offset(1f, 1f),
-                                                            blurRadius = 3f
+                                                if (!com.bearinmind.launcher314.ui.theme.LocalHideIconText.current) { // honor Hide text
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Text(
+                                                        text = cellSubFolder.name,
+                                                        fontSize = labelFontSize,
+                                                        fontFamily = labelFontFamily ?: FontFamily.Default,
+                                                        color = cardTextColor,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                        textAlign = TextAlign.Center,
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .graphicsLayer { alpha = cellLabelAlpha },
+                                                        style = MaterialTheme.typography.bodySmall.copy(
+                                                            shadow = androidx.compose.ui.graphics.Shadow(
+                                                                color = Color.Black,
+                                                                offset = Offset(1f, 1f),
+                                                                blurRadius = 3f
+                                                            )
                                                         )
                                                     )
-                                                )
+                                                }
                                             }
                                         }
 
@@ -1145,26 +1151,28 @@ internal fun FolderContentScreen(
                                     contentScale = ContentScale.Fit,
                                     modifier = Modifier.size(iconSize.dp)
                                 )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = draggedApp.name,
-                                    fontSize = labelFontSize,
-                                    fontFamily = labelFontFamily ?: FontFamily.Default,
-                                    color = Color.White,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .graphicsLayer { alpha = overlayTextAlpha },
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        shadow = androidx.compose.ui.graphics.Shadow(
-                                            color = Color.Black,
-                                            offset = Offset(1f, 1f),
-                                            blurRadius = 3f
+                                if (!com.bearinmind.launcher314.ui.theme.LocalHideIconText.current) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = draggedApp.name,
+                                        fontSize = labelFontSize,
+                                        fontFamily = labelFontFamily ?: FontFamily.Default,
+                                        color = cardTextColor,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .graphicsLayer { alpha = overlayTextAlpha },
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            shadow = androidx.compose.ui.graphics.Shadow(
+                                                color = Color.Black,
+                                                offset = Offset(1f, 1f),
+                                                blurRadius = 3f
+                                            )
                                         )
                                     )
-                                )
+                                }
                             }
                         }
                     }
