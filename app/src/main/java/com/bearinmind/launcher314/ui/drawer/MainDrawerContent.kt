@@ -93,6 +93,7 @@ import com.bearinmind.launcher314.ui.components.AnimatedPopup
 import com.bearinmind.launcher314.ui.components.LazyGridScrollbar
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -147,7 +148,7 @@ internal fun MainDrawerContent(
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
     onSearchFocusChanged: (Boolean) -> Unit = {},
-    isDrawerFullyOpen: Boolean = false,
+    isDrawerFullyOpen: () -> Boolean = { false },
     dismissSearchTrigger: Int = 0,
     isLoading: Boolean,
     folders: List<AppFolder>,
@@ -511,11 +512,13 @@ internal fun MainDrawerContent(
         }
     }
 
-    // Auto-focus search bar only when drawer is fully open
-    LaunchedEffect(isDrawerFullyOpen) {
-        if (isDrawerFullyOpen && autoOpenKeyboard && !hideSearchBar) {
-            kotlinx.coroutines.delay(200)
-            try { searchFocusRequester.requestFocus() } catch (_: Exception) {}
+    // Auto-focus search bar only when drawer is fully open (read as a flow so the flip doesn't rebuild the drawer, issue #115)
+    LaunchedEffect(autoOpenKeyboard, hideSearchBar) {
+        snapshotFlow { isDrawerFullyOpen() }.collectLatest { fullyOpen ->
+            if (fullyOpen && autoOpenKeyboard && !hideSearchBar) {
+                kotlinx.coroutines.delay(200)
+                try { searchFocusRequester.requestFocus() } catch (_: Exception) {}
+            }
         }
     }
 

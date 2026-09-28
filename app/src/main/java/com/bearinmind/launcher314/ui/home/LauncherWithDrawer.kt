@@ -65,6 +65,7 @@ import com.bearinmind.launcher314.data.AppInfo
 import com.bearinmind.launcher314.data.HomeDragCallbacks
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.MotionDurationScale
@@ -119,6 +120,8 @@ fun LauncherWithDrawer(
 
     // Issue #111 (experimental): instant drawer settle, no per-frame blur ramps.
     val reduceAnimations = com.bearinmind.launcher314.data.AnimPrefs.reduce
+    // Issue #120: Blur effects toggle; Reduce animations also drops the per-frame wallpaper blur + zoom.
+    val depthBlur = com.bearinmind.launcher314.data.AnimPrefs.blur && !reduceAnimations
 
     // True while the drawer is animating CLOSED (committed close, settling toward
     // the closed position). showAppDrawer stays true during this (the position-
@@ -293,11 +296,13 @@ fun LauncherWithDrawer(
         }
     }
 
-    // Reset search active state when drawer closes
-    LaunchedEffect(showAppDrawer) {
-        if (!showAppDrawer) {
-            isDrawerSearchActive = false
-            searchDismissed = false
+    // Reset search active state when drawer closes (snapshotFlow: a key read rebuilt the whole launcher on open, issue #115)
+    LaunchedEffect(Unit) {
+        snapshotFlow { showAppDrawer }.collect { open ->
+            if (!open) {
+                isDrawerSearchActive = false
+                searchDismissed = false
+            }
         }
     }
 
@@ -455,53 +460,56 @@ fun LauncherWithDrawer(
     val captureView = LocalView.current
     val captureActivity = remember(context) { context as? android.app.Activity }
 
-    LaunchedEffect(showAppDrawer, widgetRefreshTrigger) {
-        // Only capture when drawer is closed (home screen fully visible)
-        if (!showAppDrawer && captureActivity != null) {
-            delay(2500) // Wait for widgets and content to fully render
-            // Double-check drawer didn't reopen during the delay
-            if (!showAppDrawer) {
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    try {
-                        val w = captureView.width
-                        val h = captureView.height
-                        if (w > 0 && h > 0) {
-                            val bitmap = android.graphics.Bitmap.createBitmap(
-                                w, h, android.graphics.Bitmap.Config.ARGB_8888
-                            )
-                            // Use suspendCancellableCoroutine to bridge PixelCopy callback
-                            val success = kotlinx.coroutines.suspendCancellableCoroutine { cont ->
-                                try {
-                                    android.view.PixelCopy.request(
-                                        captureActivity.window,
-                                        bitmap,
-                                        { result ->
-                                            if (cont.isActive) {
-                                                cont.resume(result == android.view.PixelCopy.SUCCESS) {}
-                                            }
-                                        },
-                                        android.os.Handler(android.os.Looper.getMainLooper())
-                                    )
-                                } catch (e: Exception) {
-                                    if (cont.isActive) cont.resume(false) {}
-                                }
-                            }
-                            if (success) {
-                                withContext(Dispatchers.IO) {
-                                    val file = File(context.filesDir, "home_screen_preview.jpg")
-                                    FileOutputStream(file).use { out ->
-                                        bitmap.compress(
-                                            android.graphics.Bitmap.CompressFormat.JPEG,
-                                            85,
-                                            out
+    // collectLatest, not a showAppDrawer key: the key read rebuilt the whole launcher on every open/close (issue #115).
+    LaunchedEffect(widgetRefreshTrigger) {
+        snapshotFlow { showAppDrawer }.collectLatest {
+            // Only capture when drawer is closed (home screen fully visible)
+            if (!showAppDrawer && captureActivity != null) {
+                delay(2500) // Wait for widgets and content to fully render
+                // Double-check drawer didn't reopen during the delay
+                if (!showAppDrawer) {
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        try {
+                            val w = captureView.width
+                            val h = captureView.height
+                            if (w > 0 && h > 0) {
+                                val bitmap = android.graphics.Bitmap.createBitmap(
+                                    w, h, android.graphics.Bitmap.Config.ARGB_8888
+                                )
+                                // Use suspendCancellableCoroutine to bridge PixelCopy callback
+                                val success = kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+                                    try {
+                                        android.view.PixelCopy.request(
+                                            captureActivity.window,
+                                            bitmap,
+                                            { result ->
+                                                if (cont.isActive) {
+                                                    cont.resume(result == android.view.PixelCopy.SUCCESS) {}
+                                                }
+                                            },
+                                            android.os.Handler(android.os.Looper.getMainLooper())
                                         )
+                                    } catch (e: Exception) {
+                                        if (cont.isActive) cont.resume(false) {}
                                     }
                                 }
+                                if (success) {
+                                    withContext(Dispatchers.IO) {
+                                        val file = File(context.filesDir, "home_screen_preview.jpg")
+                                        FileOutputStream(file).use { out ->
+                                            bitmap.compress(
+                                                android.graphics.Bitmap.CompressFormat.JPEG,
+                                                85,
+                                                out
+                                            )
+                                        }
+                                    }
+                                }
+                                bitmap.recycle()
                             }
-                            bitmap.recycle()
+                        } catch (e: Exception) {
+                            e.printStackTrace()
                         }
-                    } catch (e: Exception) {
-                        e.printStackTrace()
                     }
                 }
             }
@@ -538,6 +546,11 @@ fun LauncherWithDrawer(
     val drawerBlockerVisible by remember {
         derivedStateOf { effectiveSwipeY > 10f }
     }
+    // Issue #115: the next drawer is built while idle and parked off-screen; opening only slides it in.
+    val drawerPrebuild = rememberDrawerPrebuild(
+        isOpen = { drawerComposed },
+        isHomeBusy = { HomePagerSwipeState.isSettling || HomePagerSwipeState.isDockSettling }
+    )
 
     // Fixed corner radius for rounded top corners like Fossify Launcher
     val drawerCornerRadius = 0.dp
@@ -652,18 +665,17 @@ fun LauncherWithDrawer(
         }
     }
 
-    // Update lastSwipeUpY when animation settles
-    LaunchedEffect(swipeUpY.value) {
-        lastSwipeUpY = swipeUpY.value
-        // Only show drawer if meaningfully pulled up (not just a rounding difference)
-        if (swipeUpY.value < drawerRangePx - 5f) {
-            showAppDrawer = true
-        } else if (!isDrawerDragging) {
-            // Settled fully closed and not actively dragging — force showAppDrawer
-            // false so the full-screen drawer Box (and its tap-blocker) is removed
-            // from the composition and can't swallow home-screen touches. Safety
-            // net against any release path that forgets to reset it.
-            showAppDrawer = false
+    // Track the drawer position; snapshotFlow, as a LaunchedEffect key it rebuilt the whole launcher every settle frame (issue #115).
+    LaunchedEffect(drawerRangePx) {
+        snapshotFlow { swipeUpY.value }.collect { y ->
+            lastSwipeUpY = y
+            // Only show drawer if meaningfully pulled up (not just a rounding difference)
+            if (y < drawerRangePx - 5f) {
+                showAppDrawer = true
+            } else if (!isDrawerDragging) {
+                // Settled closed and not dragging: drop showAppDrawer so the drawer and its tap-blocker can't swallow home touches.
+                showAppDrawer = false
+            }
         }
     }
 
@@ -892,7 +904,7 @@ fun LauncherWithDrawer(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize().watchTouches(drawerPrebuild)) {
         // ========== CUSTOM WALLPAPER BACKDROP ==========
         // Paints UNDER all launcher content. When wallpaper mode = "custom" we show
         // the imported image (scale-cropped to fill the screen). The dim overlay and
@@ -1076,9 +1088,9 @@ fun LauncherWithDrawer(
                     .then(
                         if (android.os.Build.VERSION.SDK_INT >= 31) {
                             Modifier.graphicsLayer {
-                                // Reduced: keep the base blur, drop the per-frame swipe ramp (issue #111).
+                                // Reduced or blur off: keep the base blur, drop the per-frame swipe ramp (issues #111, #120).
                                 val pr = (1f - (effectiveSwipeY / drawerRangePx)).coerceIn(0f, 1f)
-                                val ph = if (reduceAnimations) 0f else (pr / 0.4f).coerceIn(0f, 1f)
+                                val ph = if (!depthBlur) 0f else (pr / 0.4f).coerceIn(0f, 1f)
                                 val r = wallpaperBlurPercent / 100f * 25.dp.toPx() + ph * 22.dp.toPx()
                                 renderEffect = if (r > 0.5f) {
                                     androidx.compose.ui.graphics.BlurEffect(
@@ -1145,10 +1157,13 @@ fun LauncherWithDrawer(
                     }
                 }
             }
-            LaunchedEffect(depthActivity) {
+            LaunchedEffect(depthActivity, depthBlur, reduceAnimations) {
                 val win = depthActivity?.window ?: return@LaunchedEffect
                 val wmSvc = win.context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-                val blurSupported = wmSvc?.isCrossWindowBlurEnabled == true
+                val blurSupported = depthBlur && wmSvc?.isCrossWindowBlurEnabled == true
+                // Blur off / reduced (issue #120): no per-frame window blur, and no zoom when reduced.
+                val zoom = zoomMethod.takeIf { !reduceAnimations }
+                if (!blurSupported && zoom == null) return@LaunchedEffect
                 val wallpaperMgr = win.context.getSystemService(Context.WALLPAPER_SERVICE)
                     as? android.app.WallpaperManager
                 // FIX: read the SNAPSHOT state (effectiveSwipeY) inside the flow and
@@ -1163,10 +1178,10 @@ fun LauncherWithDrawer(
                     }
                     // Wallpaper zoom-out tracks the full open progress (Lawnchair
                     // pushes the wallpaper back gradually as you open). Subtle (0.5 max).
-                    if (zoomMethod != null) {
+                    if (zoom != null) {
                         runCatching {
                             win.decorView.windowToken?.let { tok ->
-                                zoomMethod.invoke(wallpaperMgr, tok, (prog * 0.5f).coerceIn(0f, 1f))
+                                zoom.invoke(wallpaperMgr, tok, (prog * 0.5f).coerceIn(0f, 1f))
                             }
                         }
                     }
@@ -1501,7 +1516,7 @@ fun LauncherWithDrawer(
                         val s = if (reduceAnimations) 1f else 1f - 0.08f * ph   // 1.0 -> 0.92
                         scaleX = s
                         scaleY = s
-                        renderEffect = if (!reduceAnimations && Build.VERSION.SDK_INT >= 31 && ph > 0.001f) {
+                        renderEffect = if (depthBlur && Build.VERSION.SDK_INT >= 31 && ph > 0.001f) {
                             val r = ph * 30.dp.toPx()            // 0 -> 30dp depth blur
                             androidx.compose.ui.graphics.BlurEffect(
                                 r, r, androidx.compose.ui.graphics.TileMode.Clamp
@@ -1556,7 +1571,7 @@ fun LauncherWithDrawer(
         // Fades in with the content; the user's drawer transparency setting caps
         // its max opacity. Gated on effectiveSwipeY so it renders during the
         // synchronous drag (swipeUpY only updates on release).
-        if (drawerComposed) {
+        ShownWhen({ drawerComposed }) {
             val scrimMaxAlpha = ((100 - com.bearinmind.launcher314.helpers
                 .getDrawerTransparency(context)) / 100f).coerceIn(0f, 1f)
             Box(
@@ -1598,11 +1613,12 @@ fun LauncherWithDrawer(
         // as the translation, so it DRAGS UP 1:1 WITH THE FINGER (offset =
         // effectiveSwipeY) and fades in as it rises. effectiveSwipeY is the
         // SYNCHRONOUS drag position, so it tracks the finger with no frame lag.
-        if (drawerComposed) {
+        PrebuiltDrawer(drawerPrebuild, isOpen = { drawerComposed }) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .offset { IntOffset(0, effectiveSwipeY.roundToInt()) }
+                    // Closed = pre-built drawer parked below the screen, out of reach of home touches (issue #115).
+                    .offset { IntOffset(0, if (drawerComposed) effectiveSwipeY.roundToInt() else (screenHeight * 2).roundToInt()) }
                     .graphicsLayer {
                         // ALL_APPS_FADE_MANUAL 0.4 -> 0.8, computed at DRAW time so
                         // dragging never recomposes the app grid underneath.
@@ -1707,7 +1723,7 @@ fun LauncherWithDrawer(
                         isDrawerSearchActive = it
                         if (it) searchDismissed = false
                     },
-                    isDrawerFullyOpen = drawerFullyOpen,
+                    isDrawerFullyOpen = { drawerFullyOpen },
                     onSettingsClick = onSettingsClick,
                     onAddToHome = addAppToHome,
                     onAddFolderToHome = addFolderToHome,
@@ -1737,7 +1753,7 @@ fun LauncherWithDrawer(
                 // the instant the close starts. The quick up/down case felt instant
                 // only because it closed from a partial position (blocker cleared at
                 // once); now full-open close behaves the same.
-                if (drawerBlockerVisible && !drawerClosing) {
+                ShownWhen({ drawerBlockerVisible && !drawerClosing }) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()

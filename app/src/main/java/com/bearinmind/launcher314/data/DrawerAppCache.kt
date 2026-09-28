@@ -1,6 +1,10 @@
 package com.bearinmind.launcher314.data
 
 import android.content.Context
+import android.content.pm.LauncherApps
+import android.os.Build
+import android.os.SystemClock
+import android.os.UserManager
 import com.bearinmind.launcher314.helpers.ProfileType
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -21,8 +25,7 @@ import java.io.File
  *  - `memory`  survives the drawer being disposed on close (lost on process death).
  *  - the JSON file survives process death (the YouTube-kill case).
  *
- * The cached list is only ever a HINT — getInstalledApps() still runs in the
- * background on open and overwrites the cache with fresh truth.
+ * The cached list is only a HINT — getInstalledApps() reruns in the background whenever [isFresh] says it may be stale.
  */
 object DrawerAppCache {
     @Volatile
@@ -80,6 +83,50 @@ object DrawerAppCache {
     /** Warm `memory` from disk at process start so the first open is instant. */
     fun warm(context: Context) {
         if (memory == null) diskApps(context)
+    }
+
+    // Issue #115: lets the drawer rebuilt after each close skip the full rescan when nothing it depends on changed.
+    @Volatile private var scanSeq = -1
+    @Volatile private var scanEnv: String? = null
+    @Volatile private var scanAt = 0L
+
+    /** Call right before a live scan; hand the result to [markScanned] afterwards. */
+    fun beginScan(context: Context): Int {
+        if (Build.VERSION.SDK_INT < 26) return -1
+        return try {
+            val since = scanSeq.coerceAtLeast(0)
+            context.packageManager.getChangedPackages(since)?.sequenceNumber ?: since
+        } catch (_: Exception) { -1 }
+    }
+
+    fun markScanned(context: Context, seq: Int) {
+        scanEnv = try { scanEnvironment(context) } catch (_: Exception) { null }
+        scanAt = SystemClock.elapsedRealtime()
+        scanSeq = seq
+    }
+
+    /** True when no package changed since the last scan and its inputs look the same. */
+    fun isFresh(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < 26) return false
+        if (memory.isNullOrEmpty() || scanSeq < 0) return false
+        if (SystemClock.elapsedRealtime() - scanAt > 5 * 60_000L) return false
+        return try {
+            context.packageManager.getChangedPackages(scanSeq) == null &&
+                scanEnvironment(context) == scanEnv
+        } catch (_: Exception) { false }
+    }
+
+    /** Labels (locale), profiles (work/private, paused), icon-pack picks and purged icon files. */
+    private fun scanEnvironment(context: Context): String {
+        val launcherApps = context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as LauncherApps
+        val userManager = context.getSystemService(Context.USER_SERVICE) as UserManager
+        val profiles = launcherApps.profiles.joinToString(",") { user ->
+            "${user.hashCode()}${if (userManager.isQuietModeEnabled(user)) "q" else ""}"
+        }
+        val packDir = File(context.cacheDir, "icon_pack_cache")
+        val iconCount = File(context.cacheDir, "app_icons").list()?.size ?: 0
+        return "${context.resources.configuration.locales.toLanguageTags()}|$profiles|" +
+            "${packDir.list()?.size}:${packDir.lastModified()}|$iconCount"
     }
 
     /** Update both tiers after a fresh enumeration. No write if unchanged. */

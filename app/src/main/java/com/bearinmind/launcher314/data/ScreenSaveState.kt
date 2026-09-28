@@ -688,6 +688,19 @@ fun setReduceAnimations(context: Context, enabled: Boolean) {
     prefs.edit().putBoolean(KEY_REDUCE_ANIMATIONS, enabled).apply()
 }
 
+// EXPERIMENTAL (issue #120): the depth blur behind the app drawer (wallpaper + fading home screen).
+private const val KEY_BLUR_EFFECTS = "experimental_blur_effects"
+
+fun getBlurEffects(context: Context): Boolean {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    return prefs.getBoolean(KEY_BLUR_EFFECTS, true)
+}
+
+fun setBlurEffects(context: Context, enabled: Boolean) {
+    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    prefs.edit().putBoolean(KEY_BLUR_EFFECTS, enabled).apply()
+}
+
 // EXPERIMENTAL (issue #89): lift the portrait lock (landscape layouts not optimized yet).
 private const val KEY_ALLOW_ROTATION = "experimental_allow_rotation"
 

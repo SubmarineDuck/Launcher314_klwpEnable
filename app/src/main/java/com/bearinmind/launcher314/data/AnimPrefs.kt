@@ -9,8 +9,13 @@ object AnimPrefs {
     @Volatile
     var reduce: Boolean = false
 
+    /** Issue #120: depth blur behind the drawer; off drops the wallpaper and home screen blur. */
+    @Volatile
+    var blur: Boolean = true
+
     fun refresh(context: Context) {
         reduce = getReduceAnimations(context)
+        blur = getBlurEffects(context)
     }
 }
 

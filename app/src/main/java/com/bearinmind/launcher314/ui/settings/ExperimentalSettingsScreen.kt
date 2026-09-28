@@ -149,6 +149,18 @@ fun ExperimentalSettingsScreen(onBack: () -> Unit) {
                     com.bearinmind.launcher314.data.AnimPrefs.refresh(context)
                 }
             )
+            // Issue #120: drawer depth blur costs GPU time on some phones.
+            var blurEffects by remember { mutableStateOf(com.bearinmind.launcher314.data.getBlurEffects(context)) }
+            SettingsToggleItem(
+                title = "Blur effects",
+                subtitle = "Blurs the wallpaper and home screen behind the app drawer",
+                checked = blurEffects,
+                onCheckedChange = {
+                    blurEffects = it
+                    com.bearinmind.launcher314.data.setBlurEffects(context, it)
+                    com.bearinmind.launcher314.data.AnimPrefs.refresh(context)
+                }
+            )
             // Issue #89: applies live via requestedOrientation; onCreate re-applies on restart.
             var allowRotation by remember { mutableStateOf(getAllowRotation(context)) }
             SettingsToggleItem(

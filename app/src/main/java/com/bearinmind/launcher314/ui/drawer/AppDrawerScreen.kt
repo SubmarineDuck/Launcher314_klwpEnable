@@ -190,7 +190,7 @@ fun AppDrawerScreen(
     onSearchActiveChanged: (Boolean) -> Unit = {},
     dismissSearchTrigger: Int = 0,
     closeFolderTrigger: Int = 0,
-    isDrawerFullyOpen: Boolean = false,
+    isDrawerFullyOpen: () -> Boolean = { false },
     onSettingsClick: () -> Unit = {},
     onAddToHome: (AppInfo) -> Unit = {},
     onAddFolderToHome: (AppFolder) -> Unit = {},
@@ -555,8 +555,13 @@ fun AppDrawerScreen(
                     isLoading = false
                 }
             }
+            // Issue #115: the drawer is rebuilt after every close; skip the full rescan when nothing changed.
+            if (appRefreshTrigger == 0 && allApps.isNotEmpty() &&
+                com.bearinmind.launcher314.data.DrawerAppCache.isFresh(context)) return@withContext
+            val scanSeq = com.bearinmind.launcher314.data.DrawerAppCache.beginScan(context)
             val apps = getInstalledApps(context)
             com.bearinmind.launcher314.data.DrawerAppCache.update(context, apps)
+            com.bearinmind.launcher314.data.DrawerAppCache.markScanned(context, scanSeq)
             // Issue #104: prune tab entries whose package is individually confirmed gone — stored lists drift as apps get uninstalled.
             val pm = context.packageManager
             val installedNow = apps.map { it.packageName }.toSet()
