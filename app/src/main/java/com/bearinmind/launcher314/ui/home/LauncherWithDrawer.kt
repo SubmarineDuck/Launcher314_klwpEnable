@@ -401,7 +401,11 @@ fun LauncherWithDrawer(
     }
 
     // Home button pressed: close the drawer and return to home screen
+    var lastHomeTrigger by rememberSaveable { mutableIntStateOf(homeButtonTrigger) }
     LaunchedEffect(homeButtonTrigger) {
+        // Re-entry (e.g. back from Widgets) replays the old count — not a new press; it sent home to page 1.
+        if (homeButtonTrigger == lastHomeTrigger) return@LaunchedEffect
+        lastHomeTrigger = homeButtonTrigger
         // Issue #80: also close an open home screen folder (fully — Home never steps out level by level).
         if (homeButtonTrigger > 0) {
             HomeFolderState.navStack = emptyList()

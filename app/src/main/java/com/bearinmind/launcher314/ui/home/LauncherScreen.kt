@@ -184,6 +184,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -1117,6 +1118,8 @@ fun LauncherScreen(
 
     // Widget drag state - using WidgetDragState from WidgetMoving.kt
     var widgetDragState by remember { mutableStateOf(WidgetDragState()) }
+    // Composition reads use this: widgetDragState changes every drag move, which rebuilt the whole home per frame.
+    val draggedWidgetNow by remember { derivedStateOf { widgetDragState.draggedWidget } }
 
     // Hovered widget cells - cells that will be highlighted during widget drag (drop target)
     // Uses the same highlighting as app movement
@@ -1197,7 +1200,8 @@ fun LauncherScreen(
     LaunchedEffect(Unit) {
         // Issue #73: Home press while ON the home screen returns to page 1 (Launcher3 feel). From the
         // drawer / another app the page is kept — unless the toggle forces the chosen default page.
-        snapshotFlow { HomePressSignal.state.intValue }.collect { v ->
+        // drop(1): the count held when home is rebuilt (e.g. back from Widgets) is an old press, not a new one.
+        snapshotFlow { HomePressSignal.state.intValue }.drop(1).collect { v ->
             if (v > 0) {
                 val toggleOn = com.bearinmind.launcher314.data.getReturnToDefaultPage(context)
                 val onHomeScreen = HomePressSignal.launcherWasForeground && !HomePressSignal.drawerWasOpen
@@ -1258,7 +1262,8 @@ fun LauncherScreen(
     // and stays open until the user dismisses or applies the edit.
     var customWallpaperSourcePath by remember { mutableStateOf<String?>(null) }
     val pickCustomWallpaper = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia()
+        // Remembered: the contract is an effect key, so a new one each rebuild re-registered the picker.
+        remember { ActivityResultContracts.PickVisualMedia() }
     ) { uri ->
         if (uri != null) {
             dropScope.launch {
@@ -2493,7 +2498,7 @@ fun LauncherScreen(
     }
 
     // Track if widget is being dragged for gesture conflict prevention
-    val isWidgetBeingDragged = widgetDragState.draggedWidget != null
+    val isWidgetBeingDragged = draggedWidgetNow != null
 
     // ========== EXTERNAL DRAG FROM DRAWER ==========
     // Uses the folder-escape pattern: the drawer's gesture handler stays alive
@@ -3220,7 +3225,7 @@ fun LauncherScreen(
                                                     (hoveredWidgetCells.contains(index) && !isWidgetOverWidget && page == widgetHoverPage)
                                     // Any item dragging includes both apps and widgets
                                     // Exclude drop animation so "+" markers disappear instantly on release
-                                    val isAnyDragging = (draggedItemIndex != null && !isDropAnimating) || (widgetDragState.draggedWidget != null && !isWidgetDropAnimating)
+                                    val isAnyDragging = (draggedItemIndex != null && !isDropAnimating) || (draggedWidgetNow != null && !isWidgetDropAnimating)
                                     // Valid drop target for apps: original position OR empty cell
                                     // For widgets: original cells are valid, others depend on isWidgetDropTargetValid
                                     val isDraggingAFolder = draggedFolderData != null
@@ -3292,7 +3297,7 @@ fun LauncherScreen(
                                             } else true,
                                             // CRITICAL: Skip gesture processing when widget, escape drag, or another cell's drag is active
                                             // Prevents other cells from picking up the pointer and showing popups that steal focus
-                                            isWidgetDragging = widgetDragState.draggedWidget != null || escapedToHomeGrid ||
+                                            isWidgetDragging = draggedWidgetNow != null || escapedToHomeGrid ||
                                                 (draggedItemIndex != null && draggedItemIndex != index),
                                             // Dynamic check evaluated inside gesture handler AFTER long press fires
                                             // Prevents popup when pointer has been down 400ms+ from original cell's press
@@ -3599,7 +3604,7 @@ fun LauncherScreen(
                                         }
 
                                         // Check if THIS widget is being dragged
-                                        val isThisWidgetDragging = widgetDragState.draggedWidget?.appWidgetId == widget.appWidgetId
+                                        val isThisWidgetDragging = draggedWidgetNow?.appWidgetId == widget.appWidgetId
                                         val isThisWidgetDropAnimating = isWidgetDropAnimating && widgetDropWidgetId == widget.appWidgetId
 
                                         // Visual effects for dragging (like apps)
@@ -3887,7 +3892,7 @@ fun LauncherScreen(
 
                                             // Check if another widget is being dragged/resized over this widget
                                             // Exclude: this widget being dragged, resized, same stack as dragged widget, or during drop animation
-                                            val draggedStackId = widgetDragState.draggedWidget?.stackId
+                                            val draggedStackId = draggedWidgetNow?.stackId
                                             val isInSameStackAsDragged = draggedStackId != null && widget.stackId == draggedStackId
                                             val isOtherWidgetHoveringOverThis = !isThisWidgetDragging &&
                                                 !isThisWidgetResizing &&
@@ -5981,7 +5986,8 @@ fun LauncherScreen(
                     val isSlotValidDropTarget = isDockSlotDragging || !slotOccupied || canDropOnOccupied
 
                     // Check if a dragged widget overlaps this dock slot (widgets can't be placed on dock)
-                    val isWidgetOverDockSlot = isWidgetBeingDragged && !isWidgetDropAnimating && run {
+                    // Derived: reading the drag offset here rebuilt the dock every frame of a widget drag.
+                    val isWidgetOverDockSlot by remember(slot) { derivedStateOf { widgetDragState.draggedWidget != null && !isWidgetDropAnimating && run {
                         val slotPos = dockPositions[slot] ?: return@run false
                         val wLeft = widgetDragScreenPos.x + widgetDragState.dragOffset.x
                         val wTop = widgetDragScreenPos.y + widgetDragState.dragOffset.y
@@ -5990,7 +5996,7 @@ fun LauncherScreen(
                         val sRight = slotPos.x + dockSlotSize.width
                         val sBottom = slotPos.y + dockSlotSize.height
                         wLeft < sRight && wRight > slotPos.x && wTop < sBottom && wBottom > slotPos.y
-                    }
+                    } } }
 
                     val isDockSlotRemoving = removeState.dockSlot == slot
                     Box(
@@ -6398,7 +6404,7 @@ fun LauncherScreen(
             val showOverlayBlueTint = isWidgetOverWidget
 
             // Check if dragged widget is part of a stack (look up from current placedWidgets)
-            val draggedWidgetId = widgetDragState.draggedWidget?.appWidgetId ?: widgetDropWidgetId
+            val draggedWidgetId = draggedWidgetNow?.appWidgetId ?: widgetDropWidgetId
             val draggedFromPlaced = placedWidgets.find { it.appWidgetId == draggedWidgetId }
             val isDraggedStack = draggedFromPlaced?.stackId != null
             val dragStackCount = if (isDraggedStack && draggedFromPlaced != null) {
