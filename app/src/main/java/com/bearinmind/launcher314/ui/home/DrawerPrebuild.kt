@@ -60,6 +60,12 @@ internal fun ShownWhen(visible: () -> Boolean, content: @Composable () -> Unit) 
     if (visible()) content()
 }
 
+/** Gives [content] its own recompose scope (state read inside rebuilds only it, not the caller) and its own method, which keeps big callers under ART's compile-size limit (issue #115). */
+@Composable
+internal fun OwnScope(content: @Composable () -> Unit) {
+    content()
+}
+
 /** Watches (never consumes) touches so the build waits for a pause between gestures. */
 internal fun Modifier.watchTouches(prebuild: DrawerPrebuild): Modifier = pointerInput(prebuild) {
     awaitEachGesture {

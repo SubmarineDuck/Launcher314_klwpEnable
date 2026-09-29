@@ -44,6 +44,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -551,6 +552,18 @@ fun LauncherWithDrawer(
         isOpen = { drawerComposed },
         isHomeBusy = { HomePagerSwipeState.isSettling || HomePagerSwipeState.isDockSettling }
     )
+    // Issue #123: dark status/nav bar icons while a light (light-theme) drawer scrim covers the wallpaper.
+    val lightDrawerScrim = drawerScrimColor.luminance() > 0.5f &&
+        com.bearinmind.launcher314.helpers.getDrawerTransparency(context) <= 40
+    LaunchedEffect(lightDrawerScrim) {
+        val win = context.findActivity()?.window ?: return@LaunchedEffect
+        snapshotFlow { lightDrawerScrim && drawerComposed && effectiveSwipeY < drawerRangePx * 0.5f }.collect { dark ->
+            androidx.core.view.WindowCompat.getInsetsController(win, captureView).apply {
+                isAppearanceLightStatusBars = dark
+                isAppearanceLightNavigationBars = dark
+            }
+        }
+    }
 
     // Fixed corner radius for rounded top corners like Fossify Launcher
     val drawerCornerRadius = 0.dp
@@ -1121,17 +1134,10 @@ fun LauncherWithDrawer(
             )
         }
 
-        // ===== Lawnchair DepthController: blur + zoom-out the WALLPAPER =====
-        // 1:1 with Lawnchair's frosted depth: the SYSTEM/live wallpaper behind the
-        // (transparent) launcher window is blurred via Window.setBackgroundBlurRadius
-        // and pushed back via WallpaperManager.setWallpaperZoomOut, both ramped with
-        // the depth phase (BLUR_MANUAL 0->0.4). Custom wallpaper is blurred by its
-        // own RenderEffect above. API 31+, only where cross-window blur is supported
-        // (Samsung One UI does). On unsupported devices this is a graceful no-op.
+        // Wallpaper zoom-out (Lawnchair DepthController); the window blur was dropped: it needs a translucent window, so it never blurred anything (issue #120).
         if (Build.VERSION.SDK_INT >= 31 &&
             wallpaperMode != com.bearinmind.launcher314.data.WALLPAPER_MODE_CUSTOM) {
             val depthActivity = remember(context) { context.findActivity() }
-            val maxWindowBlurPx = with(density) { 23.dp.toPx() }   // Launcher3 max depth blur
             // setWallpaperZoomOut is a hidden API (not in the public SDK), so we
             // reach it via REFLECTION the way third-party launchers (Lawnchair/Nova)
             // do. If the hidden-API blocklist or the OEM blocks it, this resolves to
@@ -1148,7 +1154,6 @@ fun LauncherWithDrawer(
             DisposableEffect(depthActivity) {
                 onDispose {
                     depthActivity?.window?.let { w ->
-                        runCatching { w.setBackgroundBlurRadius(0) }
                         runCatching {
                             val wm = w.context.getSystemService(Context.WALLPAPER_SERVICE)
                                 as? android.app.WallpaperManager
@@ -1157,32 +1162,20 @@ fun LauncherWithDrawer(
                     }
                 }
             }
-            LaunchedEffect(depthActivity, depthBlur, reduceAnimations) {
+            LaunchedEffect(depthActivity, reduceAnimations) {
                 val win = depthActivity?.window ?: return@LaunchedEffect
-                val wmSvc = win.context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
-                val blurSupported = depthBlur && wmSvc?.isCrossWindowBlurEnabled == true
-                // Blur off / reduced (issue #120): no per-frame window blur, and no zoom when reduced.
-                val zoom = zoomMethod.takeIf { !reduceAnimations }
-                if (!blurSupported && zoom == null) return@LaunchedEffect
+                // Reduced (issue #120): no per-frame wallpaper zoom.
+                val zoom = zoomMethod.takeIf { !reduceAnimations } ?: return@LaunchedEffect
                 val wallpaperMgr = win.context.getSystemService(Context.WALLPAPER_SERVICE)
                     as? android.app.WallpaperManager
-                // FIX: read the SNAPSHOT state (effectiveSwipeY) inside the flow and
-                // derive the phase here. Previously this read the plain `homePhase`
-                // val, which was captured once and never updated — so the blur never
-                // actually ramped. Now it tracks the drag/animation live.
+                // Reads effectiveSwipeY inside the flow so it tracks the drag/animation live.
                 snapshotFlow { effectiveSwipeY }.collect { y ->
                     val prog = (1f - (y / drawerRangePx)).coerceIn(0f, 1f)
-                    val blurPhase = (prog / 0.4f).coerceIn(0f, 1f)   // BLUR_MANUAL 0->0.4
-                    if (blurSupported) {
-                        runCatching { win.setBackgroundBlurRadius((blurPhase * maxWindowBlurPx).roundToInt()) }
-                    }
                     // Wallpaper zoom-out tracks the full open progress (Lawnchair
                     // pushes the wallpaper back gradually as you open). Subtle (0.5 max).
-                    if (zoom != null) {
-                        runCatching {
-                            win.decorView.windowToken?.let { tok ->
-                                zoom.invoke(wallpaperMgr, tok, (prog * 0.5f).coerceIn(0f, 1f))
-                            }
+                    runCatching {
+                        win.decorView.windowToken?.let { tok ->
+                            zoom.invoke(wallpaperMgr, tok, (prog * 0.5f).coerceIn(0f, 1f))
                         }
                     }
                 }

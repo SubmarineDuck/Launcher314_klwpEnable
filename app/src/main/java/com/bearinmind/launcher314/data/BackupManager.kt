@@ -29,7 +29,7 @@ object BackupManager {
     // Icon image dirs embedded as base64 (small 192px PNGs) — issue #97.
     private fun iconDirs(context: Context) = mapOf(
         "custom_icons" to getCustomIconsDir(context),
-        "icon_pack_cache" to File(context.cacheDir, "icon_pack_cache")
+        "icon_pack_cache" to com.bearinmind.launcher314.data.IconStore.dir(context, "icon_pack_cache")
     )
 
     /** Serialize everything to a pretty-printed JSON string. */

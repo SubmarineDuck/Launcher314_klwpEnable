@@ -452,7 +452,7 @@ object IconPackManager {
     /** Drop every generated (shaped / tinted) icon for one package. */
     fun clearDerivedIconCaches(context: Context, packageName: String) {
         listOf("app_icons").forEach { dir ->
-            File(context.cacheDir, dir).listFiles()
+            File(context.filesDir, dir).listFiles()
                 ?.filter { it.name.startsWith(packageName) }?.forEach { it.delete() }
         }
         listOf(
@@ -467,13 +467,13 @@ object IconPackManager {
     // ========== Directory Helpers ==========
 
     private fun getIconPackCacheDir(context: Context): File {
-        val dir = File(context.cacheDir, "icon_pack_cache")
+        val dir = com.bearinmind.launcher314.data.IconStore.dir(context, "icon_pack_cache")
         if (!dir.exists()) dir.mkdirs()
         return dir
     }
 
     private fun getIconPackAppIconsDir(context: Context): File {
-        val dir = File(context.cacheDir, "icon_pack_app_icons")
+        val dir = com.bearinmind.launcher314.data.IconStore.dir(context, "icon_pack_app_icons")
         if (!dir.exists()) dir.mkdirs()
         return dir
     }

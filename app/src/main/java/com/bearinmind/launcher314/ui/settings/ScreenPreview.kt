@@ -377,28 +377,31 @@ fun AppDrawerPreviewSection(
             ) {
                 val installedPackages = remember(previewApps) { previewApps.map { it.packageName }.toSet() }
                 CompositionLocalProvider(com.bearinmind.launcher314.ui.theme.LocalHideIconText provides hideLabels) {
-                RealAppDrawerPreview(
-                    items = previewItems,
-                    gridSize = currentGridSize.roundToInt(),
-                    iconSizePercent = currentIconSizePercent.roundToInt(),
-                    transparency = drawerTransparency.roundToInt(),
-                    wallpaperDrawable = wallpaperDrawable,
-                    scrollbarWidthPercent = scrollbarWidthPercent,
-                    scrollbarHeightPercent = scrollbarHeightPercent,
-                    scrollbarColor = scrollbarColor,
-                    scrollbarIntensity = scrollbarIntensity,
-                    drawerGridRows = drawerGridRows.roundToInt(),
-                    isPagedMode = isPagedMode,
-                    iconTextSizePercent = iconTextSizeOverride ?: getIconTextSizePercent(LocalContext.current),
-                    labelFontFamily = selectedFontFamily,
-                    onPlayClick = onPreviewDrawer,
-                    iconShapeOverride = iconShapeOverride,
-                    iconBgColorOverride = iconBgColorOverride,
-                    iconBgIntensityOverride = iconBgIntensityOverride,
-                    appCustomizations = appCustomizations,
-                    hideSearchBar = hideSearchBar,
-                    installedPackages = installedPackages
-                )
+                // The mockup is always dark: draw its chips/text with the dark palette in light mode too (issue #123).
+                com.bearinmind.launcher314.ui.theme.DarkScreenTheme {
+                    RealAppDrawerPreview(
+                        items = previewItems,
+                        gridSize = currentGridSize.roundToInt(),
+                        iconSizePercent = currentIconSizePercent.roundToInt(),
+                        transparency = drawerTransparency.roundToInt(),
+                        wallpaperDrawable = wallpaperDrawable,
+                        scrollbarWidthPercent = scrollbarWidthPercent,
+                        scrollbarHeightPercent = scrollbarHeightPercent,
+                        scrollbarColor = scrollbarColor,
+                        scrollbarIntensity = scrollbarIntensity,
+                        drawerGridRows = drawerGridRows.roundToInt(),
+                        isPagedMode = isPagedMode,
+                        iconTextSizePercent = iconTextSizeOverride ?: getIconTextSizePercent(LocalContext.current),
+                        labelFontFamily = selectedFontFamily,
+                        onPlayClick = onPreviewDrawer,
+                        iconShapeOverride = iconShapeOverride,
+                        iconBgColorOverride = iconBgColorOverride,
+                        iconBgIntensityOverride = iconBgIntensityOverride,
+                        appCustomizations = appCustomizations,
+                        hideSearchBar = hideSearchBar,
+                        installedPackages = installedPackages
+                    )
+                }
                 }
             }
 
@@ -775,30 +778,33 @@ fun DrawerPreviewCard(onPlayClick: () -> Unit = {}, hideSearchBar: Boolean = fal
         val cardContext = LocalContext.current
         val installedPackages = remember(previewApps) { previewApps.map { it.packageName }.toSet() }
         CompositionLocalProvider(com.bearinmind.launcher314.ui.theme.LocalHideIconText provides com.bearinmind.launcher314.data.getHideIconTextDrawer(cardContext)) {
-        RealAppDrawerPreview(
-            items = previewItems,
-            gridSize = gridSize,
-            iconSizePercent = iconSizePercent,
-            transparency = transparency,
-            wallpaperDrawable = wallpaperDrawable,
-            scrollbarWidthPercent = scrollbarWidthPercent,
-            scrollbarHeightPercent = scrollbarHeightPercent,
-            scrollbarColor = scrollbarColor,
-            scrollbarIntensity = scrollbarIntensity,
-            drawerGridRows = gridRows,
-            isPagedMode = isPagedMode,
-            iconTextSizePercent = iconTextSizePercent,
-            labelFontFamily = fontFamily,
-            onPlayClick = onPlayClick,
-            iconShapeOverride = iconShape,
-            iconBgColorOverride = iconBgColor,
-            iconBgIntensityOverride = iconBgIntensity,
-            appCustomizations = appCustomizations,
-            // Display-only here — let the settings page scroll under it.
-            previewScrollEnabled = false,
-            hideSearchBar = hideSearchBar,
-            installedPackages = installedPackages
-        )
+        // The mockup is always dark: draw its chips/text with the dark palette in light mode too (issue #123).
+        com.bearinmind.launcher314.ui.theme.DarkScreenTheme {
+            RealAppDrawerPreview(
+                items = previewItems,
+                gridSize = gridSize,
+                iconSizePercent = iconSizePercent,
+                transparency = transparency,
+                wallpaperDrawable = wallpaperDrawable,
+                scrollbarWidthPercent = scrollbarWidthPercent,
+                scrollbarHeightPercent = scrollbarHeightPercent,
+                scrollbarColor = scrollbarColor,
+                scrollbarIntensity = scrollbarIntensity,
+                drawerGridRows = gridRows,
+                isPagedMode = isPagedMode,
+                iconTextSizePercent = iconTextSizePercent,
+                labelFontFamily = fontFamily,
+                onPlayClick = onPlayClick,
+                iconShapeOverride = iconShape,
+                iconBgColorOverride = iconBgColor,
+                iconBgIntensityOverride = iconBgIntensity,
+                appCustomizations = appCustomizations,
+                // Display-only here — let the settings page scroll under it.
+                previewScrollEnabled = false,
+                hideSearchBar = hideSearchBar,
+                installedPackages = installedPackages
+            )
+        }
         }
     }
 }
@@ -1720,7 +1726,7 @@ fun loadPreviewApps(context: Context): List<PreviewAppInfo> {
         addCategory(Intent.CATEGORY_LAUNCHER)
     }
 
-    val iconsDir = File(context.cacheDir, "app_icons")
+    val iconsDir = com.bearinmind.launcher314.data.IconStore.dir(context, "app_icons")
     if (!iconsDir.exists()) {
         iconsDir.mkdirs()
     }

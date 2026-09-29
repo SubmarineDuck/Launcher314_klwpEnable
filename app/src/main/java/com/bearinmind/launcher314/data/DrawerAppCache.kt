@@ -123,8 +123,8 @@ object DrawerAppCache {
         val profiles = launcherApps.profiles.joinToString(",") { user ->
             "${user.hashCode()}${if (userManager.isQuietModeEnabled(user)) "q" else ""}"
         }
-        val packDir = File(context.cacheDir, "icon_pack_cache")
-        val iconCount = File(context.cacheDir, "app_icons").list()?.size ?: 0
+        val packDir = File(context.filesDir, "icon_pack_cache")
+        val iconCount = File(context.filesDir, "app_icons").list()?.size ?: 0
         return "${context.resources.configuration.locales.toLanguageTags()}|$profiles|" +
             "${packDir.list()?.size}:${packDir.lastModified()}|$iconCount"
     }

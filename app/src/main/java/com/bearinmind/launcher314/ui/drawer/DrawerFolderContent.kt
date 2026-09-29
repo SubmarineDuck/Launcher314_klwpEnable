@@ -888,11 +888,7 @@ internal fun FolderContentScreen(
                                                             .fillMaxWidth()
                                                             .graphicsLayer { alpha = cellLabelAlpha },
                                                         style = MaterialTheme.typography.bodySmall.copy(
-                                                            shadow = androidx.compose.ui.graphics.Shadow(
-                                                                color = Color.Black,
-                                                                offset = Offset(1f, 1f),
-                                                                blurRadius = 3f
-                                                            )
+                                                            shadow = com.bearinmind.launcher314.ui.theme.labelShadowFor(cardTextColor)
                                                         )
                                                     )
                                                 }
@@ -1039,11 +1035,7 @@ internal fun FolderContentScreen(
                                                             .fillMaxWidth()
                                                             .graphicsLayer { alpha = cellLabelAlpha },
                                                         style = MaterialTheme.typography.bodySmall.copy(
-                                                            shadow = androidx.compose.ui.graphics.Shadow(
-                                                                color = Color.Black,
-                                                                offset = Offset(1f, 1f),
-                                                                blurRadius = 3f
-                                                            )
+                                                            shadow = com.bearinmind.launcher314.ui.theme.labelShadowFor(cardTextColor)
                                                         )
                                                     )
                                                 }
@@ -1165,11 +1157,7 @@ internal fun FolderContentScreen(
                                             .fillMaxWidth()
                                             .graphicsLayer { alpha = overlayTextAlpha },
                                         style = MaterialTheme.typography.bodySmall.copy(
-                                            shadow = androidx.compose.ui.graphics.Shadow(
-                                                color = Color.Black,
-                                                offset = Offset(1f, 1f),
-                                                blurRadius = 3f
-                                            )
+                                            shadow = com.bearinmind.launcher314.ui.theme.labelShadowFor(cardTextColor)
                                         )
                                     )
                                 }

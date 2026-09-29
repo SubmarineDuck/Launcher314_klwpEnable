@@ -42,7 +42,7 @@ enum class ProfileType { PERSONAL, WORK, CLONE, PRIVATE, OTHER }
 object LauncherAppsHelper {
     private const val TAG = "LauncherAppsHelper"
 
-    /** Subdirectory under cacheDir that holds the badged icon PNGs. */
+    /** Subdirectory under filesDir that holds the badged icon PNGs (cacheDir got purged on low storage, issue #35). */
     private const val ICON_DIR = "app_icons"
 
     /**
@@ -176,7 +176,7 @@ object LauncherAppsHelper {
         activity: LauncherActivityInfo,
         userSerial: Long?
     ): String {
-        val iconDir = File(context.cacheDir, ICON_DIR).also { it.mkdirs() }
+        val iconDir = File(context.filesDir, ICON_DIR).also { it.mkdirs() }
         val key = if (userSerial == null) activity.applicationInfo.packageName
             else "${activity.applicationInfo.packageName}__u$userSerial"
         val file = File(iconDir, "$key.png")
@@ -204,7 +204,7 @@ object LauncherAppsHelper {
      * change broadcast so the next read regenerates.
      */
     fun invalidateIconCache(context: Context, packageName: String, userSerial: Long?) {
-        val iconDir = File(context.cacheDir, ICON_DIR)
+        val iconDir = File(context.filesDir, ICON_DIR)
         if (!iconDir.exists()) return
         val key = if (userSerial == null) packageName else "${packageName}__u$userSerial"
         File(iconDir, "$key.png").takeIf { it.exists() }?.delete()

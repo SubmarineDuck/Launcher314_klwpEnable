@@ -1188,8 +1188,11 @@ fun LauncherScreen(
     // Persist the current home page index so MainActivity's add-widget flow
     // can land the widget on the page the user is actually viewing instead
     // of always defaulting to page 0.
-    LaunchedEffect(pagerState.currentPage) {
-        prefs.edit().putInt("launcher_current_page", pagerState.currentPage.mod(totalPages.coerceAtLeast(1))).apply()
+    LaunchedEffect(pagerState) {
+        // snapshotFlow: a currentPage key rebuilt the whole home mid-swipe (issue #115)
+        snapshotFlow { pagerState.currentPage.mod(totalPages.coerceAtLeast(1)) }.collect {
+            prefs.edit().putInt("launcher_current_page", it).apply()
+        }
     }
     LaunchedEffect(Unit) {
         // Issue #73: Home press while ON the home screen returns to page 1 (Launcher3 feel). From the
@@ -1482,8 +1485,9 @@ fun LauncherScreen(
         return cells.toList()
     }
     // gridCells for the current page (used by drag/drop handlers)
-    val gridCells = remember(homeApps, allAvailableApps, placedWidgets, homeFolders, totalCells, gridColumns, currentPage, appCustomizations) {
-        buildGridCellsForPage(currentPage)
+    // Derived: a currentPage remember key rebuilt the whole home mid-swipe (issue #115)
+    val gridCells by remember(homeApps, allAvailableApps, placedWidgets, homeFolders, totalCells, gridColumns, appCustomizations) {
+        derivedStateOf { buildGridCellsForPage(currentPage) }
     }
 
     // Haptic feedback when hovering an app over a folder or another app during drag
@@ -1503,15 +1507,18 @@ fun LauncherScreen(
     // The resize overlay is bound to a single page (the widget's page); if the user
     // navigates away, resize can't be completed visually and the overlay/indicators
     // become invisible but state-active. Auto-cancel in that case.
-    LaunchedEffect(pagerState.currentPage, widgetResizeState.isResizing) {
+    LaunchedEffect(widgetResizeState.isResizing) {
         if (!widgetResizeState.isResizing) return@LaunchedEffect
         val resizingPage = resizingWidgetFresh?.page ?: return@LaunchedEffect
-        if (pagerState.currentPage.mod(totalPages.coerceAtLeast(1)) != resizingPage) {
-            hoveredWidgetCells = emptySet()
-            widgetOriginalCells = emptySet()
-            currentResizeDimensions = null
-            isWidgetDropTargetValid = true
-            widgetResizeState = WidgetResizeState()
+        // snapshotFlow: a currentPage key rebuilt the whole home mid-swipe (issue #115)
+        snapshotFlow { pagerState.currentPage.mod(totalPages.coerceAtLeast(1)) }.collect { cur ->
+            if (cur != resizingPage) {
+                hoveredWidgetCells = emptySet()
+                widgetOriginalCells = emptySet()
+                currentResizeDimensions = null
+                isWidgetDropTargetValid = true
+                widgetResizeState = WidgetResizeState()
+            }
         }
     }
 
@@ -3138,12 +3145,8 @@ fun LauncherScreen(
                         state = pagerState,
                         modifier = Modifier.fillMaxSize(),
                         flingBehavior = homePagerFlingBehavior,
-                        // NOTE: do NOT pre-compose adjacent pages (beyondBoundsPageCount).
-                        // `cellPositions` is a single map keyed by cell index only and is
-                        // shared across pages, so composing neighbor pages lets their
-                        // OFF-SCREEN cells overwrite cellPositions[index]; drag then reads
-                        // a wrong base position and the icon doesn't follow the finger.
-                        // Smoothness is handled by the per-page cell memoization below.
+                        // Pages stay built so a swipe never composes one mid-gesture (issue #115); only the on-screen page writes cellPositions.
+                        beyondBoundsPageCount = homePrebuildCount(totalPages, loopHome),
                         // Disable manual swipe during drag, when a detached
                         // icon is in edit mode, or when widgets are being
                         // manipulated.
@@ -3175,7 +3178,11 @@ fun LauncherScreen(
                             // appending the enclosing pager context ("vertical pager") to
                             // every home icon as focus moves between them.
                             .semantics { isTraversalGroup = true }
-                            .graphicsLayer { clip = false } // Allow bottom row text to overflow into padding
+                            .graphicsLayer {
+                                clip = false // Allow bottom row text to overflow into padding
+                                // Pages kept built off-screen skip drawing (issue #115); read at draw time, no recomposition.
+                                alpha = if (kotlin.math.abs(pageRaw - (pagerState.currentPage + pagerState.currentPageOffsetFraction)) < 1f) 1f else 0f
+                            }
                     ) {
                         // Inner Box contains both grid and widget overlay
                         // This ensures widgets are positioned within the same padded bounds as apps
@@ -3184,7 +3191,7 @@ fun LauncherScreen(
                                 .fillMaxSize()
                                 .graphicsLayer { clip = false } // Allow text overflow
                                 .onGloballyPositioned { coordinates ->
-                                    gridAreaOffset = coordinates.positionInRoot()
+                                    if (page == currentPage) gridAreaOffset = coordinates.positionInRoot() // on-screen page only (issue #115)
                                 }
                         ) {
                             // Grid content - clip = false allows text/icons to overflow cell bounds
@@ -3205,7 +3212,9 @@ fun LauncherScreen(
                                     // - App drag (hoveredGridCell)
                                     // - Widget drop target (hoveredWidgetCells) — but NOT during widget-over-widget (stacking)
                                     //   and only on the correct page (drag target page or resize widget's page)
+                                    // targetPage only while a widget hovers: reading it on every swipe rebuilt each shown page (issue #115)
                                     val widgetHoverPage = if (widgetResizeState.isResizing) resizingWidgetPage
+                                        else if (hoveredWidgetCells.isEmpty()) -1
                                         else pagerState.targetPage.mod(totalPages.coerceAtLeast(1))
                                     val isHovered = hoveredGridCell == index ||
                                                     (hoveredWidgetCells.contains(index) && !isWidgetOverWidget && page == widgetHoverPage)
@@ -3303,12 +3312,15 @@ fun LauncherScreen(
                                             isReceivingDrop = folderReceiveAnimIndex == index,
                                             folderCustomization = if (cell is HomeGridCell.Folder) appCustomizations.customizations["folder_${cell.folder.id}"] else null,
                                             onPositioned = { position, size ->
-                                                cellPositions = cellPositions + (index to position)
-                                                // Cell 0 only: weight() rounding leaves cells 1px apart, so every cell writing this flip-flopped it each frame and rebuilt the page.
-                                                if (index == 0) cellSize = size
+                                                // On-screen page only: pre-built neighbour pages reuse the same cell indices (issue #115).
+                                                if (page == currentPage) {
+                                                    cellPositions = cellPositions + (index to position)
+                                                    // Cell 0 only: weight() rounding leaves cells 1px apart, so every cell writing this flip-flopped it each frame and rebuilt the page.
+                                                    if (index == 0) cellSize = size
+                                                }
                                             },
                                             onFolderIconPositioned = { bounds ->
-                                                folderIconBoundsMap[index] = bounds
+                                                if (page == currentPage) folderIconBoundsMap[index] = bounds
                                             },
                                             onDragStart = {
                                                 // Only start drag if not already dragging something else
@@ -3541,6 +3553,7 @@ fun LauncherScreen(
                             // Widget overlay layer - renders widgets on top of grid cells
                             // Inside the same Box as the grid, so widgets respect the same padded bounds
                             // Widgets now support direct long-press + drag (like apps)
+                            OwnScope { // Widget layer: own method + recompose scope, keeps the page under ART's compile limit (issue #115)
                             if (cellSize.width > 0 && cellSize.height > 0) {
                                 // Filter widgets for this page, skipping non-primary stacked widgets
                                 // Sort by stackOrder so the primary widget (order=0) is always picked first per stack
@@ -3553,8 +3566,8 @@ fun LauncherScreen(
                                 }.forEach { widget ->
                                     key(widget.appWidgetId, widget.stackId) {
                                     val originCellIndex = widget.gridRow * gridColumns + widget.gridColumn
-                                    // Page-local origin, read without subscribing — absolute positions change every frame of a page swipe.
-                                    val originCellPos = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { cellPositions[originCellIndex]?.minus(gridAreaOffset) }
+                                    // Page-local origin from the grid itself: shared absolute positions leaked another page's values mid-swipe (issue #115).
+                                    val originCellPos: Offset? = Offset(widget.gridColumn * cellSize.width.toFloat(), widget.gridRow * cellSize.height.toFloat())
 
                                     if (originCellPos != null) {
                                         // Check if THIS widget is being resized (use resize dimensions)
@@ -4349,6 +4362,7 @@ fun LauncherScreen(
                                 }
                                     } // key
                             }
+                            } // OwnScope
 
                             // Widget resize overlay - shows preview outline with draggable handles
                             // Only render on the page where the widget lives.
@@ -5783,7 +5797,8 @@ fun LauncherScreen(
                     ),
                 contentAlignment = Alignment.Center
             ) {
-                Row(
+                // Own scope: the currentPage read rebuilt the whole home mid-swipe (issue #115).
+                OwnScope { Row(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -5853,7 +5868,7 @@ fun LauncherScreen(
                             }
                         }
                     }
-                }
+                } } // OwnScope
             }
 
             // Dock bar at bottom — wrapped in a HorizontalPager when there are multiple
@@ -6361,7 +6376,8 @@ fun LauncherScreen(
 
         // ========== EDGE SCROLL INDICATORS ==========
         // Rounded rectangles on left/right edges — only visible when hovering in edge zone
-        EdgeScrollIndicators(
+        // Own scope: the currentPage reads rebuilt the whole home mid-swipe (issue #115).
+        OwnScope { EdgeScrollIndicators(
             hoveringLeft = isHoveringLeftEdge && !edgeIndicatorSuppressed && pagerState.currentPage == pagerState.targetPage,
             hoveringRight = isHoveringRightEdge && !edgeIndicatorSuppressed && pagerState.currentPage == pagerState.targetPage,
             showLeft = currentPage > 0,
@@ -6369,8 +6385,9 @@ fun LauncherScreen(
             gridHPaddingPx = with(density) { gridHPadding.toPx() },
             screenWidthPx = screenWidthPx,
             modifier = Modifier.zIndex(500f)
-        )
+        ) }
 
+        OwnScope { // Drag overlays: own method + recompose scope, keeps LauncherScreen under ART's compile limit (issue #115)
         // ========== WIDGET DRAG OVERLAY ==========
         // Rendered at root level so it draws above dock bar (HorizontalPager clips internally)
         // Shows during both active drag AND drop animation (overlay animates to target cell)
@@ -6716,10 +6733,12 @@ fun LauncherScreen(
                 }
             }
         }
+        } // OwnScope
     }
 
     // ========== Home Screen Folder Content Overlay (drawer-style full screen) ==========
     // Keep a reference to the last opened folder so content persists during close animation
+    OwnScope { // Dialogs: own method + recompose scope, keeps LauncherScreen under ART's compile limit (issue #115)
     // ========== CREATE FOLDER DIALOG (from selection mode) ==========
     if (showCreateHomeFolderDialog) {
         CreateFolderDialog(
@@ -6870,6 +6889,7 @@ fun LauncherScreen(
             onDismiss = { customizingDockFolder = null }
         )
     }
+    } // OwnScope
 
     var lastOpenedFolder by remember { mutableStateOf<HomeFolder?>(null) }
     // Store folder cell origin in pixels (top-left x, top-left y, width, height)
@@ -6940,6 +6960,7 @@ fun LauncherScreen(
                 }
             }
     }
+    OwnScope { // Escape-close animation: own method + recompose scope, keeps LauncherScreen under ART's compile limit (issue #115)
     if (escapeCloseAnim.value > 0f) {
         // Use the same bounded-popup geometry as the open animation so the
         // close visual matches the new card style.
@@ -7057,8 +7078,10 @@ fun LauncherScreen(
             }
         }
     }
+    } // OwnScope
 
     // Keep the folder overlay alive during escape drag (cell's gesture handler needs it)
+    OwnScope { // Folder popup: own method + recompose scope, keeps LauncherScreen under ART's compile limit (issue #115)
     if (lastOpenedFolder != null && (folderAnim.shown || escapedToHomeGrid)) {
         // Re-derive the folder from LIVE homeFolders / dockFolders by ID rather
         // than using the captured open snapshot. openHomeFolder/lastOpenedFolder
@@ -8181,6 +8204,7 @@ fun LauncherScreen(
             )
         }
     }
+    } // OwnScope
 
     // Launcher settings menu (shown on long-press of empty area)
         // Custom position provider that places menu at touch position

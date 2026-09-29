@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.lifecycle.Lifecycle
 import com.bearinmind.launcher314.helpers.applyTransparentNavigation
@@ -441,6 +442,9 @@ class MainActivity : ComponentActivity() {
 
         super.onCreate(savedInstanceState)
 
+        // Issue #35: icons moved out of cacheDir (purged on low storage); before anything reads an icon path.
+        com.bearinmind.launcher314.data.IconStore.migrate(this)
+
         // Warm the drawer app-list cache on a background thread so the first drawer open after a cold start paints instantly.
         Thread {
             com.bearinmind.launcher314.data.DrawerAppCache.warm(applicationContext)
@@ -762,6 +766,16 @@ private fun NavController.popBackStackSafely(): Boolean {
     return if (previousBackStackEntry != null) popBackStack() else false
 }
 
+/** Issue #123: dark status/nav bar icons on the light Settings screens; read here so navigating doesn't recompose MainScreen. */
+@Composable
+private fun SettingsBarIcons(navController: NavController) {
+    val route = navController.currentBackStackEntryAsState().value?.destination?.route
+    com.bearinmind.launcher314.ui.theme.SystemBarIcons(
+        dark = !androidx.compose.foundation.isSystemInDarkTheme() &&
+            route in setOf("settings", "edit_drawer_settings", "experimental_settings", "edit_home_settings")
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
@@ -771,6 +785,7 @@ fun MainScreen(
 ) {
     val navController = rememberNavController()
     val context = androidx.compose.ui.platform.LocalContext.current
+    SettingsBarIcons(navController)
 
     // Get activity reference for permission check
     val activity = context as? MainActivity
@@ -809,32 +824,34 @@ fun MainScreen(
                 )
             }
             composable("widgets") {
-                // Widgets screen handles its own styling (matches app drawer)
-                val activity = context as? MainActivity
-                val gridColumns = getHomeGridSize(context)
-                val gridRows = getHomeGridRows(context)
-                WidgetsScreen(
-                    onBack = {
-                        navController.popBackStackSafely()
-                    },
-                    onWidgetSelected = { widget ->
-                        activity?.onWidgetSelectedFromPicker(widget)
-                        navController.popBackStackSafely() // Go back to launcher after selection
-                    },
-                    onDirectDialSelected = {
-                        activity?.startDirectDialAdd()
-                        navController.popBackStackSafely()
-                    },
-                    gridColumns = gridColumns,
-                    gridRows = gridRows,
-                    getOccupiedCells = {
-                        // Match the page addWidgetToHomeScreen targets so the pre-flight space check uses the current page.
-                        val curPage = context.getSharedPreferences("launcher_prefs", android.content.Context.MODE_PRIVATE)
-                            .getInt("launcher_current_page", 0)
-                        activity?.getOccupiedCells(gridColumns, curPage) ?: emptySet()
-                    },
-                    canPlaceWidget = { w -> activity?.canPlaceWidget(w) ?: true }
-                )
+                com.bearinmind.launcher314.ui.theme.DarkScreenTheme {
+                    // Widgets screen handles its own styling (matches app drawer)
+                    val activity = context as? MainActivity
+                    val gridColumns = getHomeGridSize(context)
+                    val gridRows = getHomeGridRows(context)
+                    WidgetsScreen(
+                        onBack = {
+                            navController.popBackStackSafely()
+                        },
+                        onWidgetSelected = { widget ->
+                            activity?.onWidgetSelectedFromPicker(widget)
+                            navController.popBackStackSafely() // Go back to launcher after selection
+                        },
+                        onDirectDialSelected = {
+                            activity?.startDirectDialAdd()
+                            navController.popBackStackSafely()
+                        },
+                        gridColumns = gridColumns,
+                        gridRows = gridRows,
+                        getOccupiedCells = {
+                            // Match the page addWidgetToHomeScreen targets so the pre-flight space check uses the current page.
+                            val curPage = context.getSharedPreferences("launcher_prefs", android.content.Context.MODE_PRIVATE)
+                                .getInt("launcher_current_page", 0)
+                            activity?.getOccupiedCells(gridColumns, curPage) ?: emptySet()
+                        },
+                        canPlaceWidget = { w -> activity?.canPlaceWidget(w) ?: true }
+                    )
+                }
             }
             composable("settings") {
                         val settingsAct = context as? MainActivity
@@ -890,14 +907,18 @@ fun MainScreen(
                         )
             }
             composable("fonts") {
-                FontsScreen(
-                    onBack = { navController.popBackStackSafely() }
-                )
+                com.bearinmind.launcher314.ui.theme.DarkScreenTheme {
+                    FontsScreen(
+                        onBack = { navController.popBackStackSafely() }
+                    )
+                }
             }
             composable("manage_tabs") {
-                com.bearinmind.launcher314.ui.drawer.ManageDrawerTabsScreen(
-                    onBack = { navController.popBackStackSafely() }
-                )
+                com.bearinmind.launcher314.ui.theme.DarkScreenTheme {
+                    com.bearinmind.launcher314.ui.drawer.ManageDrawerTabsScreen(
+                        onBack = { navController.popBackStackSafely() }
+                    )
+                }
             }
             composable("edit_drawer_settings") {
                 com.bearinmind.launcher314.ui.settings.EditDrawerSettingsScreen(
@@ -928,26 +949,34 @@ fun MainScreen(
                 )
             }
             composable("icon_packs") {
-                IconPacksScreen(
-                    onBack = { navController.popBackStackSafely() }
-                )
+                com.bearinmind.launcher314.ui.theme.DarkScreenTheme {
+                    IconPacksScreen(
+                        onBack = { navController.popBackStackSafely() }
+                    )
+                }
             }
             composable("hide_apps") {
-                HideAppsScreen(
-                    onBack = { navController.popBackStackSafely() }
-                )
+                com.bearinmind.launcher314.ui.theme.DarkScreenTheme {
+                    HideAppsScreen(
+                        onBack = { navController.popBackStackSafely() }
+                    )
+                }
             }
             composable("pinned_apps") {
-                com.bearinmind.launcher314.ui.settings.PinnedAppsScreen(
-                    onBack = { navController.popBackStackSafely() }
-                )
+                com.bearinmind.launcher314.ui.theme.DarkScreenTheme {
+                    com.bearinmind.launcher314.ui.settings.PinnedAppsScreen(
+                        onBack = { navController.popBackStackSafely() }
+                    )
+                }
             }
             composable("app_picker/{gestureId}") { backStack ->
                 val gestureId = backStack.arguments?.getString("gestureId") ?: return@composable
-                com.bearinmind.launcher314.ui.settings.AppPickerScreen(
-                    gestureId = gestureId,
-                    onBack = { navController.popBackStackSafely() }
-                )
+                com.bearinmind.launcher314.ui.theme.DarkScreenTheme {
+                    com.bearinmind.launcher314.ui.settings.AppPickerScreen(
+                        gestureId = gestureId,
+                        onBack = { navController.popBackStackSafely() }
+                    )
+                }
             }
         }
     } else {
@@ -972,38 +1001,42 @@ fun MainScreen(
                     )
                 }
                 composable("widgets") {
-                    val activity = context as? MainActivity
-                    val gridColumns = getHomeGridSize(context)
-                    val gridRows = getHomeGridRows(context)
-                    WidgetsScreen(
-                        onBack = {
-                            navController.popBackStackSafely()
-                        },
-                        onWidgetSelected = { widget ->
-                            activity?.onWidgetSelectedFromPicker(widget)
-                            navController.popBackStackSafely()
-                        },
-                        onDirectDialSelected = {
-                            activity?.startDirectDialAdd()
-                            navController.popBackStackSafely()
-                        },
-                        gridColumns = gridColumns,
-                        gridRows = gridRows,
-                        getOccupiedCells = {
-                            // Match the page addWidgetToHomeScreen targets so the pre-flight space check uses the current page.
-                            val curPage = context.getSharedPreferences("launcher_prefs", android.content.Context.MODE_PRIVATE)
-                                .getInt("launcher_current_page", 0)
-                            activity?.getOccupiedCells(gridColumns, curPage) ?: emptySet()
-                        },
-                        canPlaceWidget = { w -> activity?.canPlaceWidget(w) ?: true }
-                    )
+                    com.bearinmind.launcher314.ui.theme.DarkScreenTheme {
+                        val activity = context as? MainActivity
+                        val gridColumns = getHomeGridSize(context)
+                        val gridRows = getHomeGridRows(context)
+                        WidgetsScreen(
+                            onBack = {
+                                navController.popBackStackSafely()
+                            },
+                            onWidgetSelected = { widget ->
+                                activity?.onWidgetSelectedFromPicker(widget)
+                                navController.popBackStackSafely()
+                            },
+                            onDirectDialSelected = {
+                                activity?.startDirectDialAdd()
+                                navController.popBackStackSafely()
+                            },
+                            gridColumns = gridColumns,
+                            gridRows = gridRows,
+                            getOccupiedCells = {
+                                // Match the page addWidgetToHomeScreen targets so the pre-flight space check uses the current page.
+                                val curPage = context.getSharedPreferences("launcher_prefs", android.content.Context.MODE_PRIVATE)
+                                    .getInt("launcher_current_page", 0)
+                                activity?.getOccupiedCells(gridColumns, curPage) ?: emptySet()
+                            },
+                            canPlaceWidget = { w -> activity?.canPlaceWidget(w) ?: true }
+                        )
+                    }
                 }
                 composable("app_drawer") {
-                    AppDrawerScreen(
-                        onSettingsClick = {
-                            navController.navigateSafely("settings")
-                        }
-                    )
+                    com.bearinmind.launcher314.ui.theme.DarkScreenTheme {
+                        AppDrawerScreen(
+                            onSettingsClick = {
+                                navController.navigateSafely("settings")
+                            }
+                        )
+                    }
                 }
                 composable("settings") {
                     val settingsAct = context as? MainActivity
@@ -1062,14 +1095,18 @@ fun MainScreen(
                     )
                 }
                 composable("fonts") {
-                    FontsScreen(
-                        onBack = { navController.popBackStackSafely() }
-                    )
+                    com.bearinmind.launcher314.ui.theme.DarkScreenTheme {
+                        FontsScreen(
+                            onBack = { navController.popBackStackSafely() }
+                        )
+                    }
                 }
                 composable("manage_tabs") {
-                    com.bearinmind.launcher314.ui.drawer.ManageDrawerTabsScreen(
-                        onBack = { navController.popBackStackSafely() }
-                    )
+                    com.bearinmind.launcher314.ui.theme.DarkScreenTheme {
+                        com.bearinmind.launcher314.ui.drawer.ManageDrawerTabsScreen(
+                            onBack = { navController.popBackStackSafely() }
+                        )
+                    }
                 }
                 composable("experimental_settings") {
                     com.bearinmind.launcher314.ui.settings.ExperimentalSettingsScreen(
@@ -1105,26 +1142,34 @@ fun MainScreen(
                     )
                 }
                 composable("icon_packs") {
-                    IconPacksScreen(
-                        onBack = { navController.popBackStackSafely() }
-                    )
+                    com.bearinmind.launcher314.ui.theme.DarkScreenTheme {
+                        IconPacksScreen(
+                            onBack = { navController.popBackStackSafely() }
+                        )
+                    }
                 }
                 composable("hide_apps") {
-                    HideAppsScreen(
-                        onBack = { navController.popBackStackSafely() }
-                    )
+                    com.bearinmind.launcher314.ui.theme.DarkScreenTheme {
+                        HideAppsScreen(
+                            onBack = { navController.popBackStackSafely() }
+                        )
+                    }
                 }
                 composable("pinned_apps") {
-                    com.bearinmind.launcher314.ui.settings.PinnedAppsScreen(
-                        onBack = { navController.popBackStackSafely() }
-                    )
+                    com.bearinmind.launcher314.ui.theme.DarkScreenTheme {
+                        com.bearinmind.launcher314.ui.settings.PinnedAppsScreen(
+                            onBack = { navController.popBackStackSafely() }
+                        )
+                    }
                 }
                 composable("app_picker/{gestureId}") { backStack ->
                     val gestureId = backStack.arguments?.getString("gestureId") ?: return@composable
-                    com.bearinmind.launcher314.ui.settings.AppPickerScreen(
-                        gestureId = gestureId,
-                        onBack = { navController.popBackStackSafely() }
-                    )
+                    com.bearinmind.launcher314.ui.theme.DarkScreenTheme {
+                        com.bearinmind.launcher314.ui.settings.AppPickerScreen(
+                            gestureId = gestureId,
+                            onBack = { navController.popBackStackSafely() }
+                        )
+                    }
                 }
             }
     }

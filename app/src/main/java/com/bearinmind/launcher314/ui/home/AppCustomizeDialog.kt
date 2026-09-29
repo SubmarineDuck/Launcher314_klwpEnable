@@ -325,7 +325,7 @@ fun AppCustomizeDialog(
                     if (showOriginalForDetach) appInfo.iconPath
                     else if (customIconPath != null) customIconPath!!
                     else {
-                        val packCache = File(context.cacheDir, "icon_pack_cache/${appInfo.packageName}.png")
+                        val packCache = File(com.bearinmind.launcher314.data.IconStore.dir(context, "icon_pack_cache"), "${appInfo.packageName}.png")
                         if (packCache.exists()) packCache.absolutePath
                         else appInfo.iconPath
                     }
@@ -1855,7 +1855,7 @@ internal fun PerAppIconPackPicker(
                                     val iconFile = File(getCustomIconsDir(context), "$packageName.png")
                                     if (iconFile.exists()) iconFile.delete()
                                     // Delete icon pack cache for this app so it falls back to system
-                                    val packCacheFile = File(context.cacheDir, "icon_pack_cache/$packageName.png")
+                                    val packCacheFile = File(com.bearinmind.launcher314.data.IconStore.dir(context, "icon_pack_cache"), "$packageName.png")
                                     if (packCacheFile.exists()) packCacheFile.delete()
                                     // Clear shaped caches
                                     listOf("global_shaped_icons", "bg_color_shaped_icons", "shaped_exp_icons",
@@ -1864,7 +1864,7 @@ internal fun PerAppIconPackPicker(
                                             it.name.startsWith(packageName)
                                         }?.forEach { it.delete() }
                                     }
-                                    File(context.cacheDir, "app_icons").listFiles()?.filter {
+                                    com.bearinmind.launcher314.data.IconStore.dir(context, "app_icons").listFiles()?.filter {
                                         it.name.startsWith(packageName)
                                     }?.forEach { it.delete() }
                                     android.widget.Toast.makeText(context, "Reset to system icon", android.widget.Toast.LENGTH_SHORT).show()

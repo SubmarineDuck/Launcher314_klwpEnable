@@ -1688,7 +1688,7 @@ internal fun MainDrawerContent(
                             text = dragItem.name,
                             fontSize = labelFontSize,
                             fontFamily = labelFontFamily ?: FontFamily.Default,
-                            color = Color.White,
+                            color = com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             textAlign = TextAlign.Center,
@@ -1696,11 +1696,7 @@ internal fun MainDrawerContent(
                                 .fillMaxWidth()
                                 .graphicsLayer { alpha = overlayTextAlpha },
                             style = MaterialTheme.typography.bodySmall.copy(
-                                shadow = androidx.compose.ui.graphics.Shadow(
-                                    color = Color.Black,
-                                    offset = androidx.compose.ui.geometry.Offset(1f, 1f),
-                                    blurRadius = 3f
-                                )
+                                shadow = com.bearinmind.launcher314.ui.theme.labelShadowFor(com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current)
                             )
                         )
                     }
@@ -1737,7 +1733,7 @@ internal fun MainDrawerContent(
                             text = dragItem.name,
                             fontSize = labelFontSize,
                             fontFamily = labelFontFamily ?: FontFamily.Default,
-                            color = Color.White,
+                            color = com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             textAlign = TextAlign.Center,
@@ -1745,11 +1741,7 @@ internal fun MainDrawerContent(
                                 .fillMaxWidth()
                                 .graphicsLayer { alpha = overlayTextAlpha },
                             style = MaterialTheme.typography.bodySmall.copy(
-                                shadow = androidx.compose.ui.graphics.Shadow(
-                                    color = Color.Black,
-                                    offset = androidx.compose.ui.geometry.Offset(1f, 1f),
-                                    blurRadius = 3f
-                                )
+                                shadow = com.bearinmind.launcher314.ui.theme.labelShadowFor(com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current)
                             )
                         )
                     }

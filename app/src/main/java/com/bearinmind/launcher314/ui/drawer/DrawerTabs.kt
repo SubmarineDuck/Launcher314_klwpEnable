@@ -71,6 +71,7 @@ import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onPlaced
@@ -490,7 +491,9 @@ internal fun DrawerTabRow(
         ) {
             Text(
                 text = label,
-                color = if (selected) Color(0xFF121212) else labelColor.copy(alpha = 0.65f),
+                // Label contrasts the pill: it is light in dark mode, dark in light mode (issue #123).
+                color = if (!selected) labelColor.copy(alpha = 0.65f)
+                    else if (fillSelected.luminance() > 0.5f) Color(0xFF121212) else Color.White,
                 fontSize = 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis

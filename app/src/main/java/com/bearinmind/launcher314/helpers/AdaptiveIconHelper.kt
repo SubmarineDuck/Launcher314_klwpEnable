@@ -44,8 +44,8 @@ private fun resolveIconDrawable(context: Context, packageName: String): android.
  */
 fun clearCachedIconsForPackage(context: Context, packageName: String) {
     val cacheDirs = listOf(
-        File(context.cacheDir, "app_icons"),
-        File(context.cacheDir, "icon_pack_cache"),
+        com.bearinmind.launcher314.data.IconStore.dir(context, "app_icons"),
+        com.bearinmind.launcher314.data.IconStore.dir(context, "icon_pack_cache"),
         File(context.filesDir, "global_shaped_icons"),
         File(context.filesDir, "bg_color_shaped_icons"),
         File(context.filesDir, "shaped_exp_icons"),

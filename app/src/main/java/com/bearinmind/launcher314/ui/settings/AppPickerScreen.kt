@@ -85,7 +85,7 @@ fun AppPickerScreen(
                     val appName = resolveInfo.loadLabel(pm).toString()
                     val pkg = resolveInfo.activityInfo.packageName
                     if (pkg == context.packageName) return@mapNotNull null
-                    val iconDir = File(context.cacheDir, "app_icons")
+                    val iconDir = com.bearinmind.launcher314.data.IconStore.dir(context, "app_icons")
                     val iconFile = File(iconDir, "$pkg.png")
                     val iconPath = if (iconFile.exists()) iconFile.absolutePath else ""
                     PickerAppInfo(pkg, appName, iconPath)

@@ -77,7 +77,7 @@ fun HideAppsScreen(
                 try {
                     val appName = resolveInfo.loadLabel(pm).toString()
                     val pkg = resolveInfo.activityInfo.packageName
-                    val iconDir = File(context.cacheDir, "app_icons")
+                    val iconDir = com.bearinmind.launcher314.data.IconStore.dir(context, "app_icons")
                     val iconFile = File(iconDir, "$pkg.png")
                     val iconPath = if (iconFile.exists()) iconFile.absolutePath else ""
                     HideAppInfo(pkg, appName, iconPath)

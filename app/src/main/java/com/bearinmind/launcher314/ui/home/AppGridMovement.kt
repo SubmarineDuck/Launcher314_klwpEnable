@@ -373,13 +373,11 @@ fun DraggableGridCell(
     val currentOnLongPress by rememberUpdatedState(onLongPress)
     val currentSelectionModeActive by rememberUpdatedState(selectionModeActive)
     val currentSelectedCount by rememberUpdatedState(selectedCount)
-    var showContextMenu by remember { mutableStateOf(false) }
+    val showContextMenuState = remember { mutableStateOf(false) }
+    var showContextMenu by showContextMenuState
     var showBulkMenu by remember { mutableStateOf(false) }
     var cellPosition by remember { mutableStateOf(Offset.Zero) }
     var cellIntSize by remember { mutableStateOf(IntSize.Zero) }
-
-    // Track if we're in a potential drag state (long press started but not yet dragging)
-    var isLongPressActive by remember { mutableStateOf(false) }
 
     // Animated alpha for empty cell indicator - uses TileColorOnHover.kt
     val emptyCellAlpha = rememberHoverAlpha(isHovered = isHovered)
@@ -1329,554 +1327,40 @@ fun DraggableGridCell(
                 }
             }
 
-            is HomeGridCell.Folder -> {
-                // Folder cell - shows 2x2 preview grid of app icons
-                var showFolderRemoveConfirm by remember { mutableStateOf(false) }
-                // Tracks the folder icon's on-screen bounds (already accounting
-                // for the 1.265× scale-up that happens when the popup shows) so
-                // AnimatedPopup can anchor tight to the folder — same pattern
-                // the app-icon cell uses above.
-                val folderIconBounds = remember { IconBoundsRef() } // Issue #115: not state — see IconBoundsRef
-                val isFolderScaledUp = showContextMenu || isDragging || showFolderRemoveConfirm || isCustomizing
-                val animatedFolderScale by animateFloatAsState(
-                    targetValue = if (isFolderScaledUp) 1.265f else 1f,
-                    animationSpec = lessAnim(if (isFolderScaledUp) tween(durationMillis = 150) else snap()),
-                    label = "folderIconScale"
-                )
-                val iconScale = if (isFolderScaledUp) animatedFolderScale else 1f
-
-                // Hide label only for THIS cell when it's being dragged or has context menu open
-                val hideFolderLabel = showContextMenu || isDragging || showFolderRemoveConfirm || isCustomizing
-                val folderLabelAlpha by animateFloatAsState(
-                    targetValue = if (showContextMenu || showFolderRemoveConfirm) 0f else 1f,
-                    animationSpec = lessAnim(tween(durationMillis = 150)),
-                    label = "folderLabelAlpha"
-                )
-
-                // Dark press + flash overlay for folder
-                var isFolderFingerDown by remember { mutableStateOf(false) }
-                var folderFlashOverlay by remember { mutableStateOf(false) }
-                val folderFlashAlpha by animateFloatAsState(
-                    targetValue = if (folderFlashOverlay) 0.4f else 0f,
-                    animationSpec = lessAnim(if (folderFlashOverlay) tween(durationMillis = 80) else tween(durationMillis = 150)),
-                    label = "folder_flash_alpha",
-                    finishedListener = { if (folderFlashOverlay) folderFlashOverlay = false }
-                )
-                val folderOverlayAlpha = maxOf(if (isFolderFingerDown) 0.25f else 0f, folderFlashAlpha)
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        // Accessibility: expose the whole folder (icon + label) as ONE
-                        // focusable element that announces the folder name and opens on
-                        // activate — works even when the label is hidden or in the dock,
-                        // instead of TalkBack seeing the icon and label as two nodes.
-                        .clearAndSetSemantics {
-                            contentDescription = a11yLocation?.let { "${cell.folder.name}, $it" }
-                                ?: cell.folder.name
-                            onClick(label = "Open folder") { currentOnTap(); true }
-                        }
-                        .pointerInput(isWidgetDragging) {
-                            if (isWidgetDragging) return@pointerInput
-                            val touchSlop = viewConfiguration.touchSlop
-
-                            awaitEachGesture {
-                                val down = awaitFirstDown(requireUnconsumed = false)
-                                val startPosition = down.position
-
-                                if (startPosition.x < 0 || startPosition.x > size.width ||
-                                    startPosition.y < 0 || startPosition.y > size.height) {
-                                    return@awaitEachGesture
-                                }
-
-                                isFolderFingerDown = true
-                                var dragStarted = false
-                                var lastDragPosition = Offset.Zero
-                                val longPress = awaitLongPressOrCancellation(down.id)
-
-                                if (longPress != null) {
-                                    // Skip if another drag is already active (prevents popup stealing focus)
-                                    if (isAnyDragActive()) return@awaitEachGesture
-
-                                    isLongPressActive = true
-                                    showContextMenu = true
-                                    folderFlashOverlay = true
-                                    hapticFeedback.performLongPress()
-
-                                    try {
-                                        while (true) {
-                                            val event = awaitPointerEvent()
-                                            val change = event.changes.firstOrNull() ?: break
-
-                                            if (change.pressed) {
-                                                val dx = change.position.x - startPosition.x
-                                                val dy = change.position.y - startPosition.y
-                                                val distance = kotlin.math.sqrt(dx * dx + dy * dy)
-
-                                                if (distance > touchSlop && !dragStarted) {
-                                                    dragStarted = true
-                                                    showContextMenu = false
-                                                    lastDragPosition = change.position
-                                                    currentOnDragStart()
-                                                }
-
-                                                if (dragStarted && checkIsDragOwner()) {
-                                                    val dragDelta = Offset(
-                                                        change.position.x - lastDragPosition.x,
-                                                        change.position.y - lastDragPosition.y
-                                                    )
-                                                    lastDragPosition = change.position
-                                                    change.consume()
-                                                    onDrag(dragDelta)
-                                                }
-                                            } else {
-                                                if (dragStarted && checkIsDragOwner()) {
-                                                    onDragEnd()
-                                                }
-                                                break
-                                            }
-                                        }
-                                    } catch (e: Exception) {
-                                        if (dragStarted && checkIsDragOwner()) onDragEnd()
-                                    } finally {
-                                        isLongPressActive = false
-                                        isFolderFingerDown = false
-                                    }
-                                } else {
-                                    isFolderFingerDown = false
-                                    val upEvent = currentEvent.changes.firstOrNull()
-                                    if (upEvent != null && !upEvent.pressed) {
-                                        onTap()
-                                    }
-                                }
-                            }
-                        }
-                ) {
-                    // Folder add preview animation — shows dragged app icon in next empty slot
-                    // Set directly (not conditional) so it clears immediately on drop,
-                    // preventing ghost image at the add slot
-                    var lastFolderDraggedIconPath by remember { mutableStateOf<String?>(null) }
-                    lastFolderDraggedIconPath = folderPreviewDraggedIconPath
-                    val folderAddProgress by animateFloatAsState(
-                        targetValue = if (folderPreviewDraggedIconPath != null) 1f else 0f,
-                        // Fade in over 300ms, but snap to 0 instantly on drop to prevent ghost image
-                        animationSpec = if (folderPreviewDraggedIconPath != null) tween(durationMillis = 300) else snap(),
-                        label = "folderAddProgress",
-                        finishedListener = { value ->
-                            if (value == 0f) lastFolderDraggedIconPath = null
-                        }
-                    )
-                    val effectiveFolderDraggedIconPath = folderPreviewDraggedIconPath ?: lastFolderDraggedIconPath
-
-                    // Hover indicator — only show blue (valid), suppress red and folder add preview
-                    if (isHovered && !isDragging && isValidDropTarget && folderPreviewDraggedIconPath == null && folderAddProgress == 0f) {
-                        GridCellHoverIndicator(
-                            isHovered = true,
-                            isValidDropTarget = isValidDropTarget,
-                            markerHalfSize = markerHalfSize,
-                            cornerRadius = hoverCornerRadius
-                        )
-                    }
-
-                    // Folder content centered
-                    // Hidden when being dragged (overlay renders the folder instead)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(markerHalfSize)
-                            .graphicsLayer {
-                                clip = false
-                                alpha = if (isDragging) 0f else 1f
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        // Subtle scale pulse when accepting a dragged app
-                        val folderAcceptScale = if (folderAddProgress > 0f) {
-                            1f + 0.08f * folderAddProgress
-                        } else iconScale
-
-                        // Receive animation: pulse from 1.0 → 1.1 → 1.0 when a drop lands on this folder
-                        val receiveScale by animateFloatAsState(
-                            targetValue = if (isReceivingDrop) 1.1f else 1f,
-                            animationSpec = tween(durationMillis = 200),
-                            label = "folderReceiveScale"
-                        )
-                        val combinedScale = folderAcceptScale * receiveScale
-
-                        Column(
-                            modifier = Modifier
-                                .wrapContentHeight(unbounded = true)
-                                .graphicsLayer { clip = false },
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            // Folder preview - 2x2 grid of app icons in a rounded square
-                            // Per-folder size, same absolute-percent scale as per-app icons.
-                            val folderSizePct = if (isLandscapeNow()) globalIconSizePercent.toInt()
-                                else folderCustomization?.iconSizePercent ?: globalIconSizePercent.toInt()
-                            val folderBoxSize = (iconSize * folderSizePct / globalIconSizePercent).dp
-                            val folderCornerRadius = (iconSize * 0.29f).dp
-                            // Per-folder shape override: folder customization > global shape > rounded corner
-                            val effectiveFolderShapeName = folderCustomization?.iconShapeExp ?: globalIconShape
-                            val effectiveFolderClip = getIconShape(effectiveFolderShapeName) ?: RoundedCornerShape(folderCornerRadius)
-                            // Determine which slot index the dragged app would go into
-                            val addSlotIndex = cell.previewApps.size.coerceAtMost(3)
-                            // Red tint for mini icons when hovered by an invalid drop (e.g. folder on folder)
-                            val folderInvalidTint = if (isHovered && !isValidDropTarget && !isDragging) {
-                                ColorFilter.tint(Color(0xFFFF6B6B).copy(alpha = 0.6f), androidx.compose.ui.graphics.BlendMode.SrcAtop)
-                            } else null
-
-                            val folderBorderColor = if (folderCustomization?.iconTintColor != null) {
-                                val intensity = (folderCustomization.iconTintIntensity ?: 100) / 100f
-                                Color(folderCustomization.iconTintColor).copy(alpha = intensity.coerceIn(0f, 1f))
-                            } else com.bearinmind.launcher314.ui.theme.LocalFolderBorderColor.current
-
-                            BoxWithConstraints(
-                                modifier = Modifier
-                                    .widthIn(max = folderBoxSize).heightIn(max = folderBoxSize).aspectRatio(1f)
-                                    .onGloballyPositioned { coords ->
-                                        // Always use the final target scale (1.265f) so popup doesn't stutter during animation
-                                        val targetScale = 1.265f
-                                        val pos = coords.positionInRoot()
-                                        val w = coords.size.width * targetScale
-                                        val h = coords.size.height * targetScale
-                                        val offsetX = (coords.size.width - w) / 2f
-                                        val offsetY = (coords.size.height - h) / 2f
-                                        folderIconBounds.rect = androidx.compose.ui.geometry.Rect(
-                                            pos.x + offsetX, pos.y + offsetY,
-                                            pos.x + offsetX + w, pos.y + offsetY + h
-                                        )
-                                        // Also report to the parent (LauncherScreen) so the
-                                        // folder-open popup can align its edge exactly with
-                                        // the icon's real visible bounds.
-                                        onFolderIconPositioned?.invoke(folderIconBounds.rect)
-                                    }
-                                    .graphicsLayer {
-                                        scaleX = combinedScale
-                                        scaleY = combinedScale
-                                        clip = false
-                                    },
-                                contentAlignment = Alignment.Center
-                            ) {
-                            val folderBoxSize = maxWidth
-                            val folderCustomIcon = com.bearinmind.launcher314.data.folderCustomIconPath(folderCustomization)
-                            if (folderCustomIcon != null) {
-                                // Issue #57 — a single chosen image fills the folder,
-                                // clipped to its shape, replacing the 2x2 grid.
-                                AsyncImage(
-                                    model = File(folderCustomIcon),
-                                    contentDescription = null,
-                                    contentScale = ContentScale.Crop,
-                                    colorFilter = folderInvalidTint,
-                                    modifier = Modifier.matchParentSize().clip(effectiveFolderClip)
-                                )
-                                if (folderOverlayAlpha > 0f) {
-                                    Box(
-                                        modifier = Modifier
-                                            .matchParentSize()
-                                            .clip(effectiveFolderClip)
-                                            .graphicsLayer { alpha = folderOverlayAlpha }
-                                            .background(Color.Black)
-                                    )
-                                }
-                            } else {
-                            // Background layer — no clip, uses shape parameter
-                            Box(modifier = Modifier.matchParentSize().background(Color(0xFF1A1A1A), effectiveFolderClip))
-                            // Content layer — inset by border width and clipped so icons stay inside outline
-                            Box(
-                                modifier = Modifier
-                                    .matchParentSize()
-                                    .padding(1.dp)
-                                    .graphicsLayer { clip = true; shape = effectiveFolderClip },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (cell.previewApps.isNotEmpty()) {
-                                    val contentSize = folderBoxSize - 2.dp // account for border inset
-                                    val padding = contentSize * 0.12f
-                                    val spacing = contentSize * 0.05f
-                                    val miniIconSize = (contentSize - padding * 2 - spacing) / 2
-                                    val defaultMiniClip = if (globalIconShape != null) getIconShape(globalIconShape) ?: RoundedCornerShape(miniIconSize * 0.2f) else RoundedCornerShape(miniIconSize * 0.2f)
-
-                                    Column(
-                                        modifier = Modifier.padding(padding),
-                                        verticalArrangement = Arrangement.spacedBy(spacing)
-                                    ) {
-                                        Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                            // Slot 0
-                                            cell.previewApps.getOrNull(0)?.let { app ->
-                                                val p = remember(app.packageName, app.customization, globalIconShape, globalIconBgColor, globalIconBgIntensity) {
-                                                    resolveMiniIconPath(cellContext, app.packageName, app.iconPath, globalIconShape, globalIconBgColor, globalIconBgIntensity, app.customization)
-                                                }
-                                                val perAppClip = app.customization?.let { c -> getIconShape(c.iconShapeExp ?: c.iconShape) } ?: defaultMiniClip
-                                                val perAppTint = if (app.customization?.iconTintBackgroundOnly != true) app.customization?.iconTintColor?.let { tc ->
-                                                    val i = (app.customization.iconTintIntensity ?: 100) / 100f
-                                                    ColorFilter.tint(Color(tc.toInt()).copy(alpha = i), parseBlendMode(app.customization.iconTintBlendMode))
-                                                } else null
-                                                AsyncImage(
-                                                    model = File(p),
-                                                    contentDescription = null,
-                                                    contentScale = ContentScale.Fit,
-                                                    colorFilter = folderInvalidTint ?: perAppTint,
-                                                    modifier = Modifier
-                                                        .size(miniIconSize)
-                                                        .clip(perAppClip)
-                                                )
-                                            } ?: if (addSlotIndex == 0 && folderAddProgress > 0f && effectiveFolderDraggedIconPath != null) {
-                                                AsyncImage(
-                                                    model = File(effectiveFolderDraggedIconPath),
-                                                    contentDescription = null,
-                                                    contentScale = ContentScale.Fit,
-                                                    modifier = Modifier
-                                                        .size(miniIconSize)
-                                                        .clip(defaultMiniClip)
-                                                        .graphicsLayer { alpha = folderAddProgress }
-                                                )
-                                            } else {
-                                                Spacer(modifier = Modifier.size(miniIconSize))
-                                            }
-                                            // Slot 1
-                                            cell.previewApps.getOrNull(1)?.let { app ->
-                                                val p = remember(app.packageName, app.customization, globalIconShape, globalIconBgColor, globalIconBgIntensity) {
-                                                    resolveMiniIconPath(cellContext, app.packageName, app.iconPath, globalIconShape, globalIconBgColor, globalIconBgIntensity, app.customization)
-                                                }
-                                                val perAppClip = app.customization?.let { c -> getIconShape(c.iconShapeExp ?: c.iconShape) } ?: defaultMiniClip
-                                                val perAppTint = if (app.customization?.iconTintBackgroundOnly != true) app.customization?.iconTintColor?.let { tc ->
-                                                    val i = (app.customization.iconTintIntensity ?: 100) / 100f
-                                                    ColorFilter.tint(Color(tc.toInt()).copy(alpha = i), parseBlendMode(app.customization.iconTintBlendMode))
-                                                } else null
-                                                AsyncImage(
-                                                    model = File(p),
-                                                    contentDescription = null,
-                                                    contentScale = ContentScale.Fit,
-                                                    colorFilter = folderInvalidTint ?: perAppTint,
-                                                    modifier = Modifier
-                                                        .size(miniIconSize)
-                                                        .clip(perAppClip)
-                                                )
-                                            } ?: if (addSlotIndex == 1 && folderAddProgress > 0f && effectiveFolderDraggedIconPath != null) {
-                                                AsyncImage(
-                                                    model = File(effectiveFolderDraggedIconPath),
-                                                    contentDescription = null,
-                                                    contentScale = ContentScale.Fit,
-                                                    modifier = Modifier
-                                                        .size(miniIconSize)
-                                                        .clip(defaultMiniClip)
-                                                        .graphicsLayer { alpha = folderAddProgress }
-                                                )
-                                            } else {
-                                                Spacer(modifier = Modifier.size(miniIconSize))
-                                            }
-                                        }
-                                        Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                                            // Slot 2
-                                            cell.previewApps.getOrNull(2)?.let { app ->
-                                                val p = remember(app.packageName, app.customization, globalIconShape, globalIconBgColor, globalIconBgIntensity) {
-                                                    resolveMiniIconPath(cellContext, app.packageName, app.iconPath, globalIconShape, globalIconBgColor, globalIconBgIntensity, app.customization)
-                                                }
-                                                val perAppClip = app.customization?.let { c -> getIconShape(c.iconShapeExp ?: c.iconShape) } ?: defaultMiniClip
-                                                val perAppTint = if (app.customization?.iconTintBackgroundOnly != true) app.customization?.iconTintColor?.let { tc ->
-                                                    val i = (app.customization.iconTintIntensity ?: 100) / 100f
-                                                    ColorFilter.tint(Color(tc.toInt()).copy(alpha = i), parseBlendMode(app.customization.iconTintBlendMode))
-                                                } else null
-                                                AsyncImage(
-                                                    model = File(p),
-                                                    contentDescription = null,
-                                                    contentScale = ContentScale.Fit,
-                                                    colorFilter = folderInvalidTint ?: perAppTint,
-                                                    modifier = Modifier
-                                                        .size(miniIconSize)
-                                                        .clip(perAppClip)
-                                                )
-                                            } ?: if (addSlotIndex == 2 && folderAddProgress > 0f && effectiveFolderDraggedIconPath != null) {
-                                                AsyncImage(
-                                                    model = File(effectiveFolderDraggedIconPath),
-                                                    contentDescription = null,
-                                                    contentScale = ContentScale.Fit,
-                                                    modifier = Modifier
-                                                        .size(miniIconSize)
-                                                        .clip(defaultMiniClip)
-                                                        .graphicsLayer { alpha = folderAddProgress }
-                                                )
-                                            } else {
-                                                Spacer(modifier = Modifier.size(miniIconSize))
-                                            }
-                                            // Slot 3 — when all 4 slots occupied and hovering, crossfade to dragged app
-                                            if (folderAddProgress > 0f && effectiveFolderDraggedIconPath != null && cell.previewApps.size >= 4) {
-                                                // Crossfade: existing app fades out, dragged app fades in
-                                                Box(modifier = Modifier.size(miniIconSize)) {
-                                                    cell.previewApps.getOrNull(3)?.let { app ->
-                                                        val p = remember(app.packageName, app.customization, globalIconShape, globalIconBgColor, globalIconBgIntensity) {
-                                                            resolveMiniIconPath(cellContext, app.packageName, app.iconPath, globalIconShape, globalIconBgColor, globalIconBgIntensity, app.customization)
-                                                        }
-                                                        val perAppClip = app.customization?.let { c -> getIconShape(c.iconShapeExp ?: c.iconShape) } ?: defaultMiniClip
-                                                        AsyncImage(
-                                                            model = File(p),
-                                                            contentDescription = null,
-                                                            contentScale = ContentScale.Fit,
-                                                            colorFilter = folderInvalidTint,
-                                                            modifier = Modifier
-                                                                .size(miniIconSize)
-                                                                .clip(perAppClip)
-                                                                .graphicsLayer { alpha = 1f - folderAddProgress }
-                                                        )
-                                                    }
-                                                    AsyncImage(
-                                                        model = File(effectiveFolderDraggedIconPath),
-                                                        contentDescription = null,
-                                                        contentScale = ContentScale.Fit,
-                                                        modifier = Modifier
-                                                            .size(miniIconSize)
-                                                            .clip(RoundedCornerShape(miniIconSize * 0.2f))
-                                                            .graphicsLayer { alpha = folderAddProgress }
-                                                    )
-                                                }
-                                            } else {
-                                                cell.previewApps.getOrNull(3)?.let { app ->
-                                                    val p = remember(app.packageName, app.customization, globalIconShape, globalIconBgColor, globalIconBgIntensity) {
-                                                        resolveMiniIconPath(cellContext, app.packageName, app.iconPath, globalIconShape, globalIconBgColor, globalIconBgIntensity, app.customization)
-                                                    }
-                                                    val perAppClip = app.customization?.let { c -> getIconShape(c.iconShapeExp ?: c.iconShape) } ?: defaultMiniClip
-                                                    val perAppTint = if (app.customization?.iconTintBackgroundOnly != true) app.customization?.iconTintColor?.let { tc ->
-                                                        val i = (app.customization.iconTintIntensity ?: 100) / 100f
-                                                        ColorFilter.tint(Color(tc.toInt()).copy(alpha = i), parseBlendMode(app.customization.iconTintBlendMode))
-                                                    } else null
-                                                    AsyncImage(
-                                                        model = File(p),
-                                                        contentDescription = null,
-                                                        contentScale = ContentScale.Fit,
-                                                        colorFilter = folderInvalidTint ?: perAppTint,
-                                                        modifier = Modifier
-                                                            .size(miniIconSize)
-                                                            .clip(perAppClip)
-                                                    )
-                                                } ?: if (addSlotIndex == 3 && folderAddProgress > 0f && effectiveFolderDraggedIconPath != null) {
-                                                    AsyncImage(
-                                                        model = File(effectiveFolderDraggedIconPath),
-                                                        contentDescription = null,
-                                                        contentScale = ContentScale.Fit,
-                                                        modifier = Modifier
-                                                            .size(miniIconSize)
-                                                            .clip(defaultMiniClip)
-                                                            .graphicsLayer { alpha = folderAddProgress }
-                                                    )
-                                                } else {
-                                                    Spacer(modifier = Modifier.size(miniIconSize))
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Dark overlay (press + flash)
-                                if (folderOverlayAlpha > 0f) {
-                                    Box(
-                                        modifier = Modifier
-                                            .matchParentSize()
-                                            .graphicsLayer { alpha = folderOverlayAlpha }
-                                            .background(Color.Black)
-                                    )
-                                }
-                            } // end content Box
-                            // Border overlay — drawn on top of content so outline is always visible
-                            Box(
-                                modifier = Modifier
-                                    .matchParentSize()
-                                    .border(1.dp, folderBorderColor, effectiveFolderClip)
-                            )
-                            } // end else (default 2x2 grid)
-                            }
-
-                            Spacer(modifier = Modifier.height(iconTextSpacer))
-
-                            val folderDisplayName = folderCustomization?.customLabel ?: cell.folder.name
-                            val folderHideLabel = folderCustomization?.hideLabel ?: false ||
-                                com.bearinmind.launcher314.ui.theme.LocalHideIconText.current
-                            val folderFontSize = folderCustomization?.iconTextSizePercent?.let { 12.sp * it / 100f } ?: appNameFontSize
-                            val folderFontFamily = folderCustomization?.labelFontId?.let { id ->
-                                FontManager.bundledFonts.find { it.id == id }?.fontFamily
-                                    ?: FontManager.getImportedFonts(cellContext).find { it.id == id }?.fontFamily
-                            } ?: appNameFontFamily ?: FontFamily.Default
-                            // Same alpha-only formula as the per-app icon path above.
-                            val folderLabelColor = if (folderCustomization?.labelColor != null) {
-                                val i = (folderCustomization.labelColorIntensity ?: 100) / 100f
-                                Color(folderCustomization.labelColor).copy(alpha = i.coerceIn(0f, 1f))
-                            } else if (labelColor != Color.Unspecified) labelColor else com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current
-                            Text(
-                                text = folderDisplayName,
-                                fontSize = folderFontSize,
-                                fontFamily = folderFontFamily,
-                                color = if (isHovered && !isValidDropTarget && !isDragging)
-                                    Color(0xFFFF6B6B) else folderLabelColor,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .graphicsLayer { alpha = if (isDragging || folderHideLabel) 0f else folderLabelAlpha },
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    shadow = androidx.compose.ui.graphics.Shadow(
-                                        color = Color.Black,
-                                        offset = androidx.compose.ui.geometry.Offset(1f, 1f),
-                                        blurRadius = 3f
-                                    )
-                                )
-                            )
-                        }
-                    }
-
-                    // Context menu
-                    AnimatedPopup(
-                            visible = showContextMenu && folderIconBounds.rect != androidx.compose.ui.geometry.Rect.Zero,
-                            onDismissRequest = { showContextMenu = false },
-                            iconBoundsInRoot = folderIconBounds.rect
-                        ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .defaultMinSize(minHeight = 48.dp)
-                                            .padding(horizontal = 16.dp),
-                                        contentAlignment = Alignment.CenterStart
-                                    ) {
-                                        Text(
-                                            text = cell.folder.name,
-                                            fontWeight = FontWeight.Bold,
-                                            lineHeight = 22.sp,
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                    Divider()
-
-                                    DropdownMenuItem(
-                                        text = { Text("Remove folder") },
-                                        onClick = {
-                                            showContextMenu = false
-                                            showFolderRemoveConfirm = true
-                                        },
-                                        leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("Customize") },
-                                        onClick = {
-                                            showContextMenu = false
-                                            onCustomize()
-                                        },
-                                        leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) }
-                                    )
-                        }
-
-                    if (showFolderRemoveConfirm) {
-                        com.bearinmind.launcher314.ui.drawer.ConfirmDeleteDialog(
-                            title = "Delete folder?",
-                            message = "Apps inside this folder (${cell.folder.name}) will be removed from the launcher screen.",
-                            onConfirm = {
-                                onRemove()
-                                showFolderRemoveConfirm = false
-                            },
-                            onDismiss = { showFolderRemoveConfirm = false }
-                        )
-                    }
-                }
-            }
+            is HomeGridCell.Folder -> FolderGridCell(
+                cell = cell,
+                iconSize = iconSize,
+                isDragging = isDragging,
+                checkIsDragOwner = checkIsDragOwner,
+                isHovered = isHovered,
+                isValidDropTarget = isValidDropTarget,
+                isWidgetDragging = isWidgetDragging,
+                isAnyDragActive = isAnyDragActive,
+                markerHalfSize = markerHalfSize,
+                appNameFontSize = appNameFontSize,
+                appNameFontFamily = appNameFontFamily,
+                iconTextSpacer = iconTextSpacer,
+                hoverCornerRadius = hoverCornerRadius,
+                onFolderIconPositioned = onFolderIconPositioned,
+                onDragStart = onDragStart,
+                onDrag = onDrag,
+                onDragEnd = onDragEnd,
+                onTap = onTap,
+                onRemove = onRemove,
+                onCustomize = onCustomize,
+                isCustomizing = isCustomizing,
+                globalIconSizePercent = globalIconSizePercent,
+                globalIconShape = globalIconShape,
+                globalIconBgColor = globalIconBgColor,
+                globalIconBgIntensity = globalIconBgIntensity,
+                labelColor = labelColor,
+                folderPreviewDraggedIconPath = folderPreviewDraggedIconPath,
+                isReceivingDrop = isReceivingDrop,
+                folderCustomization = folderCustomization,
+                a11yLocation = a11yLocation,
+                hapticFeedback = hapticFeedback,
+                showContextMenuState = showContextMenuState
+            )
 
             is HomeGridCell.Widget -> {
                 // Widget origin cell - handles touch events and context menu
@@ -1954,6 +1438,597 @@ fun DraggableGridCell(
         }
         } // Close inner content Box
     } // Close outer Box
+}
+
+/** Folder cell of [DraggableGridCell]; its own method keeps the cell under ART's compile limit (issue #115). */
+@Composable
+private fun FolderGridCell(
+    cell: HomeGridCell.Folder,
+    iconSize: Int,
+    isDragging: Boolean,
+    checkIsDragOwner: () -> Boolean,
+    isHovered: Boolean,
+    isValidDropTarget: Boolean,
+    isWidgetDragging: Boolean,
+    isAnyDragActive: () -> Boolean,
+    markerHalfSize: Dp,
+    appNameFontSize: TextUnit,
+    appNameFontFamily: FontFamily?,
+    iconTextSpacer: Dp,
+    hoverCornerRadius: Dp,
+    onFolderIconPositioned: ((androidx.compose.ui.geometry.Rect) -> Unit)?,
+    onDragStart: () -> Unit,
+    onDrag: (Offset) -> Unit,
+    onDragEnd: () -> Unit,
+    onTap: () -> Unit,
+    onRemove: () -> Unit,
+    onCustomize: () -> Unit,
+    isCustomizing: Boolean,
+    globalIconSizePercent: Float,
+    globalIconShape: String?,
+    globalIconBgColor: Int?,
+    globalIconBgIntensity: Int,
+    labelColor: Color,
+    folderPreviewDraggedIconPath: String?,
+    isReceivingDrop: Boolean,
+    folderCustomization: com.bearinmind.launcher314.data.AppCustomization?,
+    a11yLocation: String?,
+    hapticFeedback: com.bearinmind.launcher314.helpers.HapticFeedbackController,
+    showContextMenuState: MutableState<Boolean>
+) {
+    val cellContext = LocalContext.current
+    val currentOnDragStart by rememberUpdatedState(onDragStart)
+    val currentOnTap by rememberUpdatedState(onTap)
+    var showContextMenu by showContextMenuState
+    // Track if we're in a potential drag state (long press started but not yet dragging)
+    var isLongPressActive by remember { mutableStateOf(false) }
+
+    // Folder cell - shows 2x2 preview grid of app icons
+    var showFolderRemoveConfirm by remember { mutableStateOf(false) }
+    // Tracks the folder icon's on-screen bounds (already accounting
+    // for the 1.265× scale-up that happens when the popup shows) so
+    // AnimatedPopup can anchor tight to the folder — same pattern
+    // the app-icon cell uses above.
+    val folderIconBounds = remember { IconBoundsRef() } // Issue #115: not state — see IconBoundsRef
+    val isFolderScaledUp = showContextMenu || isDragging || showFolderRemoveConfirm || isCustomizing
+    val animatedFolderScale by animateFloatAsState(
+        targetValue = if (isFolderScaledUp) 1.265f else 1f,
+        animationSpec = lessAnim(if (isFolderScaledUp) tween(durationMillis = 150) else snap()),
+        label = "folderIconScale"
+    )
+    val iconScale = if (isFolderScaledUp) animatedFolderScale else 1f
+
+    // Hide label only for THIS cell when it's being dragged or has context menu open
+    val hideFolderLabel = showContextMenu || isDragging || showFolderRemoveConfirm || isCustomizing
+    val folderLabelAlpha by animateFloatAsState(
+        targetValue = if (showContextMenu || showFolderRemoveConfirm) 0f else 1f,
+        animationSpec = lessAnim(tween(durationMillis = 150)),
+        label = "folderLabelAlpha"
+    )
+
+    // Dark press + flash overlay for folder
+    var isFolderFingerDown by remember { mutableStateOf(false) }
+    var folderFlashOverlay by remember { mutableStateOf(false) }
+    val folderFlashAlpha by animateFloatAsState(
+        targetValue = if (folderFlashOverlay) 0.4f else 0f,
+        animationSpec = lessAnim(if (folderFlashOverlay) tween(durationMillis = 80) else tween(durationMillis = 150)),
+        label = "folder_flash_alpha",
+        finishedListener = { if (folderFlashOverlay) folderFlashOverlay = false }
+    )
+    val folderOverlayAlpha = maxOf(if (isFolderFingerDown) 0.25f else 0f, folderFlashAlpha)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            // Accessibility: expose the whole folder (icon + label) as ONE
+            // focusable element that announces the folder name and opens on
+            // activate — works even when the label is hidden or in the dock,
+            // instead of TalkBack seeing the icon and label as two nodes.
+            .clearAndSetSemantics {
+                contentDescription = a11yLocation?.let { "${cell.folder.name}, $it" }
+                    ?: cell.folder.name
+                onClick(label = "Open folder") { currentOnTap(); true }
+            }
+            .pointerInput(isWidgetDragging) {
+                if (isWidgetDragging) return@pointerInput
+                val touchSlop = viewConfiguration.touchSlop
+
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val startPosition = down.position
+
+                    if (startPosition.x < 0 || startPosition.x > size.width ||
+                        startPosition.y < 0 || startPosition.y > size.height) {
+                        return@awaitEachGesture
+                    }
+
+                    isFolderFingerDown = true
+                    var dragStarted = false
+                    var lastDragPosition = Offset.Zero
+                    val longPress = awaitLongPressOrCancellation(down.id)
+
+                    if (longPress != null) {
+                        // Skip if another drag is already active (prevents popup stealing focus)
+                        if (isAnyDragActive()) return@awaitEachGesture
+
+                        isLongPressActive = true
+                        showContextMenu = true
+                        folderFlashOverlay = true
+                        hapticFeedback.performLongPress()
+
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
+
+                                if (change.pressed) {
+                                    val dx = change.position.x - startPosition.x
+                                    val dy = change.position.y - startPosition.y
+                                    val distance = kotlin.math.sqrt(dx * dx + dy * dy)
+
+                                    if (distance > touchSlop && !dragStarted) {
+                                        dragStarted = true
+                                        showContextMenu = false
+                                        lastDragPosition = change.position
+                                        currentOnDragStart()
+                                    }
+
+                                    if (dragStarted && checkIsDragOwner()) {
+                                        val dragDelta = Offset(
+                                            change.position.x - lastDragPosition.x,
+                                            change.position.y - lastDragPosition.y
+                                        )
+                                        lastDragPosition = change.position
+                                        change.consume()
+                                        onDrag(dragDelta)
+                                    }
+                                } else {
+                                    if (dragStarted && checkIsDragOwner()) {
+                                        onDragEnd()
+                                    }
+                                    break
+                                }
+                            }
+                        } catch (e: Exception) {
+                            if (dragStarted && checkIsDragOwner()) onDragEnd()
+                        } finally {
+                            isLongPressActive = false
+                            isFolderFingerDown = false
+                        }
+                    } else {
+                        isFolderFingerDown = false
+                        val upEvent = currentEvent.changes.firstOrNull()
+                        if (upEvent != null && !upEvent.pressed) {
+                            onTap()
+                        }
+                    }
+                }
+            }
+    ) {
+        // Folder add preview animation — shows dragged app icon in next empty slot
+        // Set directly (not conditional) so it clears immediately on drop,
+        // preventing ghost image at the add slot
+        var lastFolderDraggedIconPath by remember { mutableStateOf<String?>(null) }
+        lastFolderDraggedIconPath = folderPreviewDraggedIconPath
+        val folderAddProgress by animateFloatAsState(
+            targetValue = if (folderPreviewDraggedIconPath != null) 1f else 0f,
+            // Fade in over 300ms, but snap to 0 instantly on drop to prevent ghost image
+            animationSpec = if (folderPreviewDraggedIconPath != null) tween(durationMillis = 300) else snap(),
+            label = "folderAddProgress",
+            finishedListener = { value ->
+                if (value == 0f) lastFolderDraggedIconPath = null
+            }
+        )
+        val effectiveFolderDraggedIconPath = folderPreviewDraggedIconPath ?: lastFolderDraggedIconPath
+
+        // Hover indicator — only show blue (valid), suppress red and folder add preview
+        if (isHovered && !isDragging && isValidDropTarget && folderPreviewDraggedIconPath == null && folderAddProgress == 0f) {
+            GridCellHoverIndicator(
+                isHovered = true,
+                isValidDropTarget = isValidDropTarget,
+                markerHalfSize = markerHalfSize,
+                cornerRadius = hoverCornerRadius
+            )
+        }
+
+        // Folder content centered
+        // Hidden when being dragged (overlay renders the folder instead)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(markerHalfSize)
+                .graphicsLayer {
+                    clip = false
+                    alpha = if (isDragging) 0f else 1f
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            // Subtle scale pulse when accepting a dragged app
+            val folderAcceptScale = if (folderAddProgress > 0f) {
+                1f + 0.08f * folderAddProgress
+            } else iconScale
+
+            // Receive animation: pulse from 1.0 → 1.1 → 1.0 when a drop lands on this folder
+            val receiveScale by animateFloatAsState(
+                targetValue = if (isReceivingDrop) 1.1f else 1f,
+                animationSpec = tween(durationMillis = 200),
+                label = "folderReceiveScale"
+            )
+            val combinedScale = folderAcceptScale * receiveScale
+
+            Column(
+                modifier = Modifier
+                    .wrapContentHeight(unbounded = true)
+                    .graphicsLayer { clip = false },
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Folder preview - 2x2 grid of app icons in a rounded square
+                // Per-folder size, same absolute-percent scale as per-app icons.
+                val folderSizePct = if (isLandscapeNow()) globalIconSizePercent.toInt()
+                    else folderCustomization?.iconSizePercent ?: globalIconSizePercent.toInt()
+                val folderBoxSize = (iconSize * folderSizePct / globalIconSizePercent).dp
+                val folderCornerRadius = (iconSize * 0.29f).dp
+                // Per-folder shape override: folder customization > global shape > rounded corner
+                val effectiveFolderShapeName = folderCustomization?.iconShapeExp ?: globalIconShape
+                val effectiveFolderClip = getIconShape(effectiveFolderShapeName) ?: RoundedCornerShape(folderCornerRadius)
+                // Determine which slot index the dragged app would go into
+                val addSlotIndex = cell.previewApps.size.coerceAtMost(3)
+                // Red tint for mini icons when hovered by an invalid drop (e.g. folder on folder)
+                val folderInvalidTint = if (isHovered && !isValidDropTarget && !isDragging) {
+                    ColorFilter.tint(Color(0xFFFF6B6B).copy(alpha = 0.6f), androidx.compose.ui.graphics.BlendMode.SrcAtop)
+                } else null
+
+                val folderBorderColor = if (folderCustomization?.iconTintColor != null) {
+                    val intensity = (folderCustomization.iconTintIntensity ?: 100) / 100f
+                    Color(folderCustomization.iconTintColor).copy(alpha = intensity.coerceIn(0f, 1f))
+                } else com.bearinmind.launcher314.ui.theme.LocalFolderBorderColor.current
+
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .widthIn(max = folderBoxSize).heightIn(max = folderBoxSize).aspectRatio(1f)
+                        .onGloballyPositioned { coords ->
+                            // Always use the final target scale (1.265f) so popup doesn't stutter during animation
+                            val targetScale = 1.265f
+                            val pos = coords.positionInRoot()
+                            val w = coords.size.width * targetScale
+                            val h = coords.size.height * targetScale
+                            val offsetX = (coords.size.width - w) / 2f
+                            val offsetY = (coords.size.height - h) / 2f
+                            folderIconBounds.rect = androidx.compose.ui.geometry.Rect(
+                                pos.x + offsetX, pos.y + offsetY,
+                                pos.x + offsetX + w, pos.y + offsetY + h
+                            )
+                            // Also report to the parent (LauncherScreen) so the
+                            // folder-open popup can align its edge exactly with
+                            // the icon's real visible bounds.
+                            onFolderIconPositioned?.invoke(folderIconBounds.rect)
+                        }
+                        .graphicsLayer {
+                            scaleX = combinedScale
+                            scaleY = combinedScale
+                            clip = false
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                val folderBoxSize = maxWidth
+                val folderCustomIcon = com.bearinmind.launcher314.data.folderCustomIconPath(folderCustomization)
+                if (folderCustomIcon != null) {
+                    // Issue #57 — a single chosen image fills the folder,
+                    // clipped to its shape, replacing the 2x2 grid.
+                    AsyncImage(
+                        model = File(folderCustomIcon),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        colorFilter = folderInvalidTint,
+                        modifier = Modifier.matchParentSize().clip(effectiveFolderClip)
+                    )
+                    if (folderOverlayAlpha > 0f) {
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .clip(effectiveFolderClip)
+                                .graphicsLayer { alpha = folderOverlayAlpha }
+                                .background(Color.Black)
+                        )
+                    }
+                } else {
+                // Background layer — no clip, uses shape parameter
+                Box(modifier = Modifier.matchParentSize().background(Color(0xFF1A1A1A), effectiveFolderClip))
+                // Content layer — inset by border width and clipped so icons stay inside outline
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .padding(1.dp)
+                        .graphicsLayer { clip = true; shape = effectiveFolderClip },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (cell.previewApps.isNotEmpty()) {
+                        val contentSize = folderBoxSize - 2.dp // account for border inset
+                        val padding = contentSize * 0.12f
+                        val spacing = contentSize * 0.05f
+                        val miniIconSize = (contentSize - padding * 2 - spacing) / 2
+                        val defaultMiniClip = if (globalIconShape != null) getIconShape(globalIconShape) ?: RoundedCornerShape(miniIconSize * 0.2f) else RoundedCornerShape(miniIconSize * 0.2f)
+
+                        Column(
+                            modifier = Modifier.padding(padding),
+                            verticalArrangement = Arrangement.spacedBy(spacing)
+                        ) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+                                // Slot 0
+                                cell.previewApps.getOrNull(0)?.let { app ->
+                                    val p = remember(app.packageName, app.customization, globalIconShape, globalIconBgColor, globalIconBgIntensity) {
+                                        resolveMiniIconPath(cellContext, app.packageName, app.iconPath, globalIconShape, globalIconBgColor, globalIconBgIntensity, app.customization)
+                                    }
+                                    val perAppClip = app.customization?.let { c -> getIconShape(c.iconShapeExp ?: c.iconShape) } ?: defaultMiniClip
+                                    val perAppTint = if (app.customization?.iconTintBackgroundOnly != true) app.customization?.iconTintColor?.let { tc ->
+                                        val i = (app.customization.iconTintIntensity ?: 100) / 100f
+                                        ColorFilter.tint(Color(tc.toInt()).copy(alpha = i), parseBlendMode(app.customization.iconTintBlendMode))
+                                    } else null
+                                    AsyncImage(
+                                        model = File(p),
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Fit,
+                                        colorFilter = folderInvalidTint ?: perAppTint,
+                                        modifier = Modifier
+                                            .size(miniIconSize)
+                                            .clip(perAppClip)
+                                    )
+                                } ?: if (addSlotIndex == 0 && folderAddProgress > 0f && effectiveFolderDraggedIconPath != null) {
+                                    AsyncImage(
+                                        model = File(effectiveFolderDraggedIconPath),
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier
+                                            .size(miniIconSize)
+                                            .clip(defaultMiniClip)
+                                            .graphicsLayer { alpha = folderAddProgress }
+                                    )
+                                } else {
+                                    Spacer(modifier = Modifier.size(miniIconSize))
+                                }
+                                // Slot 1
+                                cell.previewApps.getOrNull(1)?.let { app ->
+                                    val p = remember(app.packageName, app.customization, globalIconShape, globalIconBgColor, globalIconBgIntensity) {
+                                        resolveMiniIconPath(cellContext, app.packageName, app.iconPath, globalIconShape, globalIconBgColor, globalIconBgIntensity, app.customization)
+                                    }
+                                    val perAppClip = app.customization?.let { c -> getIconShape(c.iconShapeExp ?: c.iconShape) } ?: defaultMiniClip
+                                    val perAppTint = if (app.customization?.iconTintBackgroundOnly != true) app.customization?.iconTintColor?.let { tc ->
+                                        val i = (app.customization.iconTintIntensity ?: 100) / 100f
+                                        ColorFilter.tint(Color(tc.toInt()).copy(alpha = i), parseBlendMode(app.customization.iconTintBlendMode))
+                                    } else null
+                                    AsyncImage(
+                                        model = File(p),
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Fit,
+                                        colorFilter = folderInvalidTint ?: perAppTint,
+                                        modifier = Modifier
+                                            .size(miniIconSize)
+                                            .clip(perAppClip)
+                                    )
+                                } ?: if (addSlotIndex == 1 && folderAddProgress > 0f && effectiveFolderDraggedIconPath != null) {
+                                    AsyncImage(
+                                        model = File(effectiveFolderDraggedIconPath),
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier
+                                            .size(miniIconSize)
+                                            .clip(defaultMiniClip)
+                                            .graphicsLayer { alpha = folderAddProgress }
+                                    )
+                                } else {
+                                    Spacer(modifier = Modifier.size(miniIconSize))
+                                }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+                                // Slot 2
+                                cell.previewApps.getOrNull(2)?.let { app ->
+                                    val p = remember(app.packageName, app.customization, globalIconShape, globalIconBgColor, globalIconBgIntensity) {
+                                        resolveMiniIconPath(cellContext, app.packageName, app.iconPath, globalIconShape, globalIconBgColor, globalIconBgIntensity, app.customization)
+                                    }
+                                    val perAppClip = app.customization?.let { c -> getIconShape(c.iconShapeExp ?: c.iconShape) } ?: defaultMiniClip
+                                    val perAppTint = if (app.customization?.iconTintBackgroundOnly != true) app.customization?.iconTintColor?.let { tc ->
+                                        val i = (app.customization.iconTintIntensity ?: 100) / 100f
+                                        ColorFilter.tint(Color(tc.toInt()).copy(alpha = i), parseBlendMode(app.customization.iconTintBlendMode))
+                                    } else null
+                                    AsyncImage(
+                                        model = File(p),
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Fit,
+                                        colorFilter = folderInvalidTint ?: perAppTint,
+                                        modifier = Modifier
+                                            .size(miniIconSize)
+                                            .clip(perAppClip)
+                                    )
+                                } ?: if (addSlotIndex == 2 && folderAddProgress > 0f && effectiveFolderDraggedIconPath != null) {
+                                    AsyncImage(
+                                        model = File(effectiveFolderDraggedIconPath),
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier
+                                            .size(miniIconSize)
+                                            .clip(defaultMiniClip)
+                                            .graphicsLayer { alpha = folderAddProgress }
+                                    )
+                                } else {
+                                    Spacer(modifier = Modifier.size(miniIconSize))
+                                }
+                                // Slot 3 — when all 4 slots occupied and hovering, crossfade to dragged app
+                                if (folderAddProgress > 0f && effectiveFolderDraggedIconPath != null && cell.previewApps.size >= 4) {
+                                    // Crossfade: existing app fades out, dragged app fades in
+                                    Box(modifier = Modifier.size(miniIconSize)) {
+                                        cell.previewApps.getOrNull(3)?.let { app ->
+                                            val p = remember(app.packageName, app.customization, globalIconShape, globalIconBgColor, globalIconBgIntensity) {
+                                                resolveMiniIconPath(cellContext, app.packageName, app.iconPath, globalIconShape, globalIconBgColor, globalIconBgIntensity, app.customization)
+                                            }
+                                            val perAppClip = app.customization?.let { c -> getIconShape(c.iconShapeExp ?: c.iconShape) } ?: defaultMiniClip
+                                            AsyncImage(
+                                                model = File(p),
+                                                contentDescription = null,
+                                                contentScale = ContentScale.Fit,
+                                                colorFilter = folderInvalidTint,
+                                                modifier = Modifier
+                                                    .size(miniIconSize)
+                                                    .clip(perAppClip)
+                                                    .graphicsLayer { alpha = 1f - folderAddProgress }
+                                            )
+                                        }
+                                        AsyncImage(
+                                            model = File(effectiveFolderDraggedIconPath),
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Fit,
+                                            modifier = Modifier
+                                                .size(miniIconSize)
+                                                .clip(RoundedCornerShape(miniIconSize * 0.2f))
+                                                .graphicsLayer { alpha = folderAddProgress }
+                                        )
+                                    }
+                                } else {
+                                    cell.previewApps.getOrNull(3)?.let { app ->
+                                        val p = remember(app.packageName, app.customization, globalIconShape, globalIconBgColor, globalIconBgIntensity) {
+                                            resolveMiniIconPath(cellContext, app.packageName, app.iconPath, globalIconShape, globalIconBgColor, globalIconBgIntensity, app.customization)
+                                        }
+                                        val perAppClip = app.customization?.let { c -> getIconShape(c.iconShapeExp ?: c.iconShape) } ?: defaultMiniClip
+                                        val perAppTint = if (app.customization?.iconTintBackgroundOnly != true) app.customization?.iconTintColor?.let { tc ->
+                                            val i = (app.customization.iconTintIntensity ?: 100) / 100f
+                                            ColorFilter.tint(Color(tc.toInt()).copy(alpha = i), parseBlendMode(app.customization.iconTintBlendMode))
+                                        } else null
+                                        AsyncImage(
+                                            model = File(p),
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Fit,
+                                            colorFilter = folderInvalidTint ?: perAppTint,
+                                            modifier = Modifier
+                                                .size(miniIconSize)
+                                                .clip(perAppClip)
+                                        )
+                                    } ?: if (addSlotIndex == 3 && folderAddProgress > 0f && effectiveFolderDraggedIconPath != null) {
+                                        AsyncImage(
+                                            model = File(effectiveFolderDraggedIconPath),
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Fit,
+                                            modifier = Modifier
+                                                .size(miniIconSize)
+                                                .clip(defaultMiniClip)
+                                                .graphicsLayer { alpha = folderAddProgress }
+                                        )
+                                    } else {
+                                        Spacer(modifier = Modifier.size(miniIconSize))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Dark overlay (press + flash)
+                    if (folderOverlayAlpha > 0f) {
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .graphicsLayer { alpha = folderOverlayAlpha }
+                                .background(Color.Black)
+                        )
+                    }
+                } // end content Box
+                // Border overlay — drawn on top of content so outline is always visible
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .border(1.dp, folderBorderColor, effectiveFolderClip)
+                )
+                } // end else (default 2x2 grid)
+                }
+
+                Spacer(modifier = Modifier.height(iconTextSpacer))
+
+                val folderDisplayName = folderCustomization?.customLabel ?: cell.folder.name
+                val folderHideLabel = folderCustomization?.hideLabel ?: false ||
+                    com.bearinmind.launcher314.ui.theme.LocalHideIconText.current
+                val folderFontSize = folderCustomization?.iconTextSizePercent?.let { 12.sp * it / 100f } ?: appNameFontSize
+                val folderFontFamily = folderCustomization?.labelFontId?.let { id ->
+                    FontManager.bundledFonts.find { it.id == id }?.fontFamily
+                        ?: FontManager.getImportedFonts(cellContext).find { it.id == id }?.fontFamily
+                } ?: appNameFontFamily ?: FontFamily.Default
+                // Same alpha-only formula as the per-app icon path above.
+                val folderLabelColor = if (folderCustomization?.labelColor != null) {
+                    val i = (folderCustomization.labelColorIntensity ?: 100) / 100f
+                    Color(folderCustomization.labelColor).copy(alpha = i.coerceIn(0f, 1f))
+                } else if (labelColor != Color.Unspecified) labelColor else com.bearinmind.launcher314.ui.theme.LocalLabelTextColor.current
+                Text(
+                    text = folderDisplayName,
+                    fontSize = folderFontSize,
+                    fontFamily = folderFontFamily,
+                    color = if (isHovered && !isValidDropTarget && !isDragging)
+                        Color(0xFFFF6B6B) else folderLabelColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer { alpha = if (isDragging || folderHideLabel) 0f else folderLabelAlpha },
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        shadow = androidx.compose.ui.graphics.Shadow(
+                            color = Color.Black,
+                            offset = androidx.compose.ui.geometry.Offset(1f, 1f),
+                            blurRadius = 3f
+                        )
+                    )
+                )
+            }
+        }
+
+        // Context menu
+        AnimatedPopup(
+                visible = showContextMenu && folderIconBounds.rect != androidx.compose.ui.geometry.Rect.Zero,
+                onDismissRequest = { showContextMenu = false },
+                iconBoundsInRoot = folderIconBounds.rect
+            ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .defaultMinSize(minHeight = 48.dp)
+                                .padding(horizontal = 16.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Text(
+                                text = cell.folder.name,
+                                fontWeight = FontWeight.Bold,
+                                lineHeight = 22.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Divider()
+
+                        DropdownMenuItem(
+                            text = { Text("Remove folder") },
+                            onClick = {
+                                showContextMenu = false
+                                showFolderRemoveConfirm = true
+                            },
+                            leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Customize") },
+                            onClick = {
+                                showContextMenu = false
+                                onCustomize()
+                            },
+                            leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null) }
+                        )
+            }
+
+        if (showFolderRemoveConfirm) {
+            com.bearinmind.launcher314.ui.drawer.ConfirmDeleteDialog(
+                title = "Delete folder?",
+                message = "Apps inside this folder (${cell.folder.name}) will be removed from the launcher screen.",
+                onConfirm = {
+                    onRemove()
+                    showFolderRemoveConfirm = false
+                },
+                onDismiss = { showFolderRemoveConfirm = false }
+            )
+        }
+    }
 }
 
 /** Issue #89: landscape ignores per-item size overrides — its rows are too short for oversized icons. */
