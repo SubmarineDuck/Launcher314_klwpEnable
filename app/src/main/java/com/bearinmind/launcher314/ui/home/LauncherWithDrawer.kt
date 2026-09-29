@@ -77,7 +77,6 @@ import com.bearinmind.launcher314.data.getHomeGridSize
 import com.bearinmind.launcher314.data.getHomeGridRows
 import com.bearinmind.launcher314.ui.widgets.WidgetManager
 import java.io.File
-import java.io.FileOutputStream
 import kotlin.math.roundToInt
 
 /**
@@ -461,65 +460,8 @@ fun LauncherWithDrawer(
         }
     }
 
-    // Capture home screen screenshot for settings preview (via PixelCopy)
+    // No home screenshot after drawer close any more: nothing showed it, yet each one cost a 16MB bitmap + JPEG write.
     val captureView = LocalView.current
-    val captureActivity = remember(context) { context as? android.app.Activity }
-
-    // collectLatest, not a showAppDrawer key: the key read rebuilt the whole launcher on every open/close (issue #115).
-    LaunchedEffect(widgetRefreshTrigger) {
-        snapshotFlow { showAppDrawer }.collectLatest {
-            // Only capture when drawer is closed (home screen fully visible)
-            if (!showAppDrawer && captureActivity != null) {
-                delay(2500) // Wait for widgets and content to fully render
-                // Double-check drawer didn't reopen during the delay
-                if (!showAppDrawer) {
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                        try {
-                            val w = captureView.width
-                            val h = captureView.height
-                            if (w > 0 && h > 0) {
-                                val bitmap = android.graphics.Bitmap.createBitmap(
-                                    w, h, android.graphics.Bitmap.Config.ARGB_8888
-                                )
-                                // Use suspendCancellableCoroutine to bridge PixelCopy callback
-                                val success = kotlinx.coroutines.suspendCancellableCoroutine { cont ->
-                                    try {
-                                        android.view.PixelCopy.request(
-                                            captureActivity.window,
-                                            bitmap,
-                                            { result ->
-                                                if (cont.isActive) {
-                                                    cont.resume(result == android.view.PixelCopy.SUCCESS) {}
-                                                }
-                                            },
-                                            android.os.Handler(android.os.Looper.getMainLooper())
-                                        )
-                                    } catch (e: Exception) {
-                                        if (cont.isActive) cont.resume(false) {}
-                                    }
-                                }
-                                if (success) {
-                                    withContext(Dispatchers.IO) {
-                                        val file = File(context.filesDir, "home_screen_preview.jpg")
-                                        FileOutputStream(file).use { out ->
-                                            bitmap.compress(
-                                                android.graphics.Bitmap.CompressFormat.JPEG,
-                                                85,
-                                                out
-                                            )
-                                        }
-                                    }
-                                }
-                                bitmap.recycle()
-                            }
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                        }
-                    }
-                }
-            }
-        }
-    }
 
     // ===================== LAWNCHAIR / LAUNCHER3 MANUAL ALL-APPS =====================
     // Faithful port of Launcher3 AllAppsSwipeController (the *_MANUAL variants).
