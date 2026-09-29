@@ -154,6 +154,12 @@ fun LazyGridScrollbar(
         val availableScrollSpace = maxHeightPx - thumbMinHeightPx
         val thumbOffsetPx = scrollOffset * availableScrollSpace
         val thumbOffsetDp = with(density) { thumbOffsetPx.toDp() }
+        // pointerInput(Unit) keeps its first lambda, so it read the scroll position from first composition forever; read live values instead.
+        val liveScrollOffset by rememberUpdatedState(scrollOffset)
+        val liveScrollSpace by rememberUpdatedState(availableScrollSpace)
+        val liveMaxIndex by rememberUpdatedState((totalItemsCount - visibleItemsCount).coerceAtLeast(0))
+        val liveTotal by rememberUpdatedState(totalItemsCount)
+        var dragThumbOffset by remember { mutableFloatStateOf(0f) }
 
         // Track background
         Box(
@@ -180,20 +186,19 @@ fun LazyGridScrollbar(
                 .background(animatedThumbColor)
                 .pointerInput(Unit) {
                     detectVerticalDragGestures(
-                        onDragStart = { isThumbSelected = true; DrawerScrollbarState.isActive = true },
+                        onDragStart = { isThumbSelected = true; DrawerScrollbarState.isActive = true; dragThumbOffset = liveScrollOffset },
                         onDragEnd = { isThumbSelected = false; DrawerScrollbarState.isActive = false },
                         onDragCancel = { isThumbSelected = false; DrawerScrollbarState.isActive = false },
                         onVerticalDrag = { change, dragAmount ->
                             change.consume()
 
-                            // Calculate new scroll position based on drag
-                            val dragRatio = if (availableScrollSpace > 0) dragAmount / availableScrollSpace else 0f
-                            val newScrollOffset = (scrollOffset + dragRatio).coerceIn(0f, 1f)
+                            // Thumb follows the finger (accumulated), so whole-item rounding can't stall it
+                            val dragRatio = if (liveScrollSpace > 0) dragAmount / liveScrollSpace else 0f
+                            dragThumbOffset = (dragThumbOffset + dragRatio).coerceIn(0f, 1f)
 
                             // Calculate target item index
-                            val maxScrollIndex = (totalItemsCount - visibleItemsCount).coerceAtLeast(0)
-                            val targetIndex = (newScrollOffset * maxScrollIndex).toInt()
-                                .coerceIn(0, totalItemsCount - 1)
+                            val targetIndex = (dragThumbOffset * liveMaxIndex).toInt()
+                                .coerceIn(0, (liveTotal - 1).coerceAtLeast(0))
 
                             coroutineScope.launch {
                                 gridState.scrollToItem(targetIndex)
@@ -273,6 +278,7 @@ fun VerticalScrollbar(
         val scrollFraction = (scrollState.value.toFloat() / maxScroll).coerceIn(0f, 1f)
         val thumbHeightDp = with(density) { thumbHeightPx.toDp() }
         val thumbOffsetDp = with(density) { (scrollFraction * available).toDp() }
+        val liveAvailable by rememberUpdatedState(available) // pointerInput(Unit) keeps its first lambda
 
         Box(
             modifier = Modifier
@@ -290,9 +296,8 @@ fun VerticalScrollbar(
                         onDragCancel = { isThumbSelected = false },
                         onVerticalDrag = { change, dragAmount ->
                             change.consume()
-                            val dragFraction = if (available > 0f) dragAmount / available else 0f
-                            val newValue = ((scrollFraction + dragFraction).coerceIn(0f, 1f) * maxScroll).toInt()
-                            coroutineScope.launch { scrollState.scrollTo(newValue) }
+                            // Relative to the live scroll position (a captured fraction snapped it back to the start).
+                            if (liveAvailable > 0f) scrollState.dispatchRawDelta(dragAmount / liveAvailable * scrollState.maxValue)
                         }
                     )
                 }
