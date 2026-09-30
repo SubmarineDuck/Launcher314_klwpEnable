@@ -1012,6 +1012,17 @@ fun migrateLegacyGesturePrefs(context: Context) {
     editor.apply()
 }
 
+/** Issue #125: the Settings switch wrote swipe_down_notifications, which the home screen never read; carry an explicit choice over to the gesture flag once. */
+fun migrateSwipeDownToggle(context: Context) {
+    val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    if (prefs.getBoolean("swipe_down_toggle_migrated", false)) return
+    val editor = prefs.edit().putBoolean("swipe_down_toggle_migrated", true)
+    if (prefs.contains(KEY_SWIPE_DOWN_NOTIFICATIONS)) {
+        editor.putBoolean(gestureEnabledKey(GestureId.SWIPE_DOWN), prefs.getBoolean(KEY_SWIPE_DOWN_NOTIFICATIONS, false))
+    }
+    editor.apply()
+}
+
 // Recent Apps overlay (issue #40, Phase 4) preferences.
 private const val KEY_RECENT_APPS_SORT = "recent_apps_sort"   // 0 = recency, 1 = frequency
 private const val KEY_RECENT_APPS_COUNT = "recent_apps_count" // 1..30

@@ -810,7 +810,9 @@ fun DraggableGridCell(
                             }
                             val perAppSizePercent = if (isLandscapeNow()) globalIconSizePercent.toInt()
                                 else cell.appInfo.customization?.iconSizePercent ?: globalIconSizePercent.toInt()
-                            val perAppIconSizeDp = (iconSize * perAppSizePercent / globalIconSizePercent.toFloat()).dp
+                            // Folder popup cells are sized to fit the popup: a larger per-app size spilled into the next row there.
+                            val perAppIconSizeDp = (iconSize * perAppSizePercent / globalIconSizePercent.toFloat())
+                                .let { if (isFolderPopupCell) it.coerceAtMost(iconSize.toFloat()) else it }.dp
                             // When bg color is set, generate icon with user color as bg layer
                             val useBgColorIcon = globalIconBgColor != null && !hasCustomIcon
                             val bgColorEffectiveShape = if (useBgColorIcon) {

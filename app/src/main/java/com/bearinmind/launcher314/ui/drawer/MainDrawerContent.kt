@@ -42,6 +42,7 @@ import androidx.compose.material.icons.outlined.Storage
 import androidx.compose.material.icons.outlined.Update
 import androidx.compose.material3.*
 import androidx.compose.material3.LocalContentColor
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -250,6 +251,8 @@ internal fun MainDrawerContent(
     val drawerDropAnim = remember { Animatable(0f) }
     var drawerDragCurrentOffset by remember { mutableStateOf(Offset.Zero) } // snapshot for drop lerp
     var drawerDragCellSize by remember { mutableStateOf(IntSize.Zero) }
+    // Issue #126: grid scroll not yet taken out of the drag deltas (plain holder: no recomposition)
+    val drawerScrollComp = remember { floatArrayOf(0f) }
     val drawerDragScope = rememberCoroutineScope()
     val drawerHaptic = rememberHapticFeedback()
 
@@ -268,7 +271,11 @@ internal fun MainDrawerContent(
     var folderDropTargetPos by remember { mutableStateOf(Offset.Zero) } // folder center in root coords
 
     // Shared drag move/end lambdas (cell-agnostic)
-    val drawerDragMove: (Offset) -> Unit = { delta ->
+    val drawerDragMove: (Offset) -> Unit = { rawDelta ->
+        // Auto-scroll moves the dragged cell, so its next local delta includes that scroll; take it back out (issue #126).
+        val delta = if (rawDelta != Offset.Zero && drawerScrollComp[0] != 0f) {
+            rawDelta - Offset(0f, drawerScrollComp[0]).also { drawerScrollComp[0] = 0f }
+        } else rawDelta
         drawerDragOffset += delta
         if (transferredToHome) {
             // Gesture still alive — forward cell center to home screen
@@ -1337,10 +1344,47 @@ internal fun MainDrawerContent(
                 gridState.scrollToItem(0)
             }
 
+            // Issue #126: holding a dragged app near the grid's top/bottom edge scrolls the drawer so off-screen folders can be reached.
+            var gridBoxHeight by remember { mutableIntStateOf(0) }
+            val autoScrollDensity = LocalDensity.current
+            LaunchedEffect(gridState) {
+                snapshotFlow { drawerDraggedItem != null }.collectLatest { dragging ->
+                    if (!dragging) return@collectLatest
+                    drawerScrollComp[0] = 0f
+                    val edge = with(autoScrollDensity) { 64.dp.toPx() }
+                    val maxStep = with(autoScrollDensity) { 14.dp.toPx() }
+                    val tabAllowance = with(autoScrollDensity) { 60.dp.toPx() }
+                    val minMove = with(autoScrollDensity) { 48.dp.toPx() }
+                    var scrolledLastFrame = false
+                    while (true) {
+                        withFrameNanos { }
+                        if (scrolledLastFrame) drawerDragMove(Offset.Zero) // re-check hover against the moved cells
+                        scrolledLastFrame = false
+                        if (transferredToHome || isDropZoneHovered || gridBoxHeight == 0) continue
+                        if (drawerDragOffset.getDistance() < minMove) continue // not on pickup: an app picked up near an edge would scroll at once
+                        // Bands start where cells become visible: the grid box also runs under the search bar / drop zone and tab row.
+                        // Dragged icon's top/bottom edges (like the drop-zone hit test), not its center (the label area, well below the finger).
+                        val y = drawerDragStartOffset.y + drawerDragOffset.y
+                        val yBottom = y + drawerDragCellSize.height
+                        val top = if (!reverseSearchBar && dropZoneBounds != Rect.Zero) dropZoneBounds.bottom + tabAllowance else drawerGridRootPos.y
+                        val bottom = if (reverseSearchBar && dropZoneBounds != Rect.Zero) dropZoneBounds.top else drawerGridRootPos.y + gridBoxHeight
+                        val step = when {
+                            y < top + edge -> -maxStep * ((top + edge - y) / edge).coerceIn(0.25f, 1f)
+                            yBottom > bottom - edge -> maxStep * ((yBottom - bottom + edge) / edge).coerceIn(0.25f, 1f)
+                            else -> 0f
+                        }
+                        if (step != 0f) {
+                            val used = gridState.scrollBy(step)
+                            if (used != 0f) { drawerScrollComp[0] += used; scrolledLastFrame = true }
+                        }
+                    }
+                }
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .onGloballyPositioned { drawerGridRootPos = it.positionInRoot() }
+                    .onGloballyPositioned { drawerGridRootPos = it.positionInRoot(); gridBoxHeight = it.size.height }
             ) {
                 // Stretch overscroll stays ON: the close gesture is taken at the
                 // RAW pointer level in LauncherWithDrawer (Initial pass), so the
@@ -1396,6 +1440,12 @@ internal fun MainDrawerContent(
                         val folder = listItem
                         val cellKey = "folder_${folder.id}"
                         val isDragTarget = drawerDraggedItem == folder
+                        // Pinned while dragged: auto-scroll must not dispose the cell that owns the gesture (issue #126).
+                        val dragPin = androidx.compose.ui.layout.LocalPinnableContainer.current
+                        DisposableEffect(isDragTarget) {
+                            val handle = if (isDragTarget) dragPin?.pin() else null
+                            onDispose { handle?.release() }
+                        }
                         val cellDragStart: () -> Unit = {
                             if (drawerDraggedItem == null) {
                                 drawerDraggedItem = folder
@@ -1454,6 +1504,12 @@ internal fun MainDrawerContent(
                         val app = listItem
                         val cellKey = "app_${app.packageName}_u${app.userSerial ?: 0}"
                         val isDragTarget = drawerDraggedItem == app
+                        // Pinned while dragged: auto-scroll must not dispose the cell that owns the gesture (issue #126).
+                        val dragPin = androidx.compose.ui.layout.LocalPinnableContainer.current
+                        DisposableEffect(isDragTarget) {
+                            val handle = if (isDragTarget) dragPin?.pin() else null
+                            onDispose { handle?.release() }
+                        }
                         val cellDragStart: () -> Unit = {
                             if (drawerDraggedItem == null) {
                                 drawerDraggedItem = app

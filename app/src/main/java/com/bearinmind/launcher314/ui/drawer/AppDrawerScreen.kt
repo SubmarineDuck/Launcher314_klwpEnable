@@ -1671,7 +1671,7 @@ fun AppDrawerScreen(
 }
 
 // MainDrawerContent moved to MainDrawerContent.kt
-// FolderItem, FolderPreviewIcon, AppItem, FolderAppItem, SelectableAppItem, CreateFolderDialog moved to DrawerAppItems.kt
+// FolderItem, FolderPreviewIcon, SelectableAppItem, CreateFolderDialog moved to DrawerAppItems.kt
 // FolderContentScreen moved to DrawerFolderContent.kt
 
 

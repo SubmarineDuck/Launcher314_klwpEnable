@@ -1280,7 +1280,11 @@ fun LauncherWithDrawer(
                         // down just closes the drawer — it never fires the swipe-down
                         // action (no stray notification shade), and vice-versa. This is
                         // the fix for "other touch events firing while dragging".
-                        val isSwipeDown = overSlop > 0f && swipeDownEnabled
+                        // Read live (issue #125): Settings runs in another activity, so a composition-time value stayed "enabled" after turning it off.
+                        val isSwipeDown = overSlop > 0f &&
+                            com.bearinmind.launcher314.data.getGestureEnabled(context, com.bearinmind.launcher314.data.GestureId.SWIPE_DOWN) &&
+                            com.bearinmind.launcher314.data.getGestureAction(context, com.bearinmind.launcher314.data.GestureId.SWIPE_DOWN) !=
+                                com.bearinmind.launcher314.data.GestureAction.None
                         var totalDragAmount = overSlop
                         // Track fling velocity so release can commit Lawnchair-style:
                         // any upward fling opens (downward closes) regardless of how

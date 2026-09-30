@@ -1990,8 +1990,9 @@ private fun HomeScreenGestureSettings(
         }
 
         // Swipe down for notifications/quick settings
-        var swipeDownEnabled by remember { mutableStateOf(com.bearinmind.launcher314.data.getSwipeDownNotifications(context)) }
-        var swipeDownMode by remember { mutableIntStateOf(com.bearinmind.launcher314.data.getSwipeDownMode(context)) }
+        // Issue #125: the gesture flag + action are what the home screen reads (the old swipe_down_notifications pref was ignored).
+        var swipeDownEnabled by remember { mutableStateOf(com.bearinmind.launcher314.data.getGestureEnabled(context, com.bearinmind.launcher314.data.GestureId.SWIPE_DOWN)) }
+        var swipeDownMode by remember { mutableIntStateOf(if (com.bearinmind.launcher314.data.getGestureAction(context, com.bearinmind.launcher314.data.GestureId.SWIPE_DOWN) is com.bearinmind.launcher314.data.GestureAction.OpenQuickSettings) 1 else 0) }
         var showSwipeDownDropdown by remember { mutableStateOf(false) }
         val swipeDownModeLabel = if (swipeDownMode == 0) "Notifications" else "Quick Settings"
 
@@ -2001,7 +2002,7 @@ private fun HomeScreenGestureSettings(
                 .heightIn(min = 64.dp)
                 .clickable {
                     swipeDownEnabled = !swipeDownEnabled
-                    com.bearinmind.launcher314.data.setSwipeDownNotifications(context, swipeDownEnabled)
+                    com.bearinmind.launcher314.data.setGestureEnabled(context, com.bearinmind.launcher314.data.GestureId.SWIPE_DOWN, swipeDownEnabled)
                 }
                 .padding(horizontal = 16.dp, vertical = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -2101,7 +2102,7 @@ private fun HomeScreenGestureSettings(
                 checked = swipeDownEnabled,
                 onCheckedChange = {
                     swipeDownEnabled = it
-                    com.bearinmind.launcher314.data.setSwipeDownNotifications(context, it)
+                    com.bearinmind.launcher314.data.setGestureEnabled(context, com.bearinmind.launcher314.data.GestureId.SWIPE_DOWN, it)
                 }
             )
         }
