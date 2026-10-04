@@ -1815,9 +1815,10 @@ fun LauncherScreen(
             )
             homeApps = updatedGridApps
             dockApps = updatedDockApps
-            dockFolders = dockFolders + newFolder
+            val updatedDockFolders = dockFolders + newFolder // one list for state + save (re-adding in the save stored it twice)
+            dockFolders = updatedDockFolders
             dropScope.launch(Dispatchers.IO) {
-                saveHomeScreenData(context, HomeScreenData(apps = updatedGridApps, dockApps = updatedDockApps, folders = homeFolders, dockFolders = dockFolders + newFolder))
+                saveHomeScreenData(context, HomeScreenData(apps = updatedGridApps, dockApps = updatedDockApps, folders = homeFolders, dockFolders = updatedDockFolders))
             }
         }
     }
@@ -2708,9 +2709,10 @@ fun LauncherScreen(
                             page = currentDockPage
                         )
                         dockApps = updatedDockApps
-                        dockFolders = dockFolders + newFolder
+                        val updatedDockFolders = dockFolders + newFolder // one list for state + save (re-adding in the save stored it twice)
+                        dockFolders = updatedDockFolders
                         dropScope.launch(Dispatchers.IO) {
-                            saveHomeScreenData(context, HomeScreenData(apps = homeApps, dockApps = updatedDockApps, folders = homeFolders, dockFolders = dockFolders + newFolder))
+                            saveHomeScreenData(context, HomeScreenData(apps = homeApps, dockApps = updatedDockApps, folders = homeFolders, dockFolders = updatedDockFolders))
                         }
                     }
                 }
@@ -7790,14 +7792,22 @@ fun LauncherScreen(
                                                             if (updated != null && updated.appPackageNames.count { it.isNotEmpty() } <= 1 &&
                                                         updated.appPackageNames.none { com.bearinmind.launcher314.data.isFolderEntry(it) }) {
                                                                 val remainingPkg = updated.appPackageNames.firstOrNull { it.isNotEmpty() }
-                                                                if (remainingPkg != null) {
-                                                                    homeApps = homeApps + HomeScreenApp(
-                                                                        packageName = remainingPkg,
-                                                                        position = folder.position,
-                                                                        page = folder.page
-                                                                    )
+                                                                if (folder.page < -1) {
+                                                                    // Issue #129: a sub-folder dissolves into its parent's slot (its app used to vanish onto hidden page -2).
+                                                                    val (nh, nd) = com.bearinmind.launcher314.data.dissolveSubFolder(updatedFolders, dockFolders, folder.id, remainingPkg)
+                                                                    homeFolders = nh
+                                                                    dockFolders = nd
+                                                                    saveAllData()
+                                                                } else {
+                                                                    if (remainingPkg != null) {
+                                                                        homeApps = homeApps + HomeScreenApp(
+                                                                            packageName = remainingPkg,
+                                                                            position = folder.position,
+                                                                            page = folder.page
+                                                                        )
+                                                                    }
+                                                                    saveHomeFolders(homeFolders.filter { it.id != folder.id })
                                                                 }
-                                                                saveHomeFolders(homeFolders.filter { it.id != folder.id })
                                                             } else {
                                                                 saveHomeFolders(updatedFolders)
                                                             }
@@ -7809,9 +7819,9 @@ fun LauncherScreen(
                                                         val folderOriginPos = if (isDockFolder) {
                                                             val df = dockFolders.find { it.id == folder.id }
                                                             if (df != null) dockPositions[df.position] else null
-                                                        } else {
+                                                        } else if (folder.page >= 0) {
                                                             cellPositions[folder.position]
-                                                        }
+                                                        } else folderCellOrigin // Issue #129: a sub-folder has no grid cell (icon jumped to the top-left)
                                                         val currentAbsPos = cellPos + dragOffset
                                                         val escapeDragOff = if (folderOriginPos != null) {
                                                             currentAbsPos - folderOriginPos
@@ -7999,6 +8009,17 @@ fun LauncherScreen(
                                                     if (isDockFolder) saveDockFolders(nd)
                                                     saveHomeFolders(nh)
                                                     openHomeFolder = reopened
+                                                } else if (folder.page < -1) {
+                                                    // Issue #129: in a sub-folder, "Remove from folder" moves the app up into its parent.
+                                                    val (nh, nd, subLeft) = com.bearinmind.launcher314.data.moveUpFromSubFolder(homeFolders, dockFolders, folder.id, cellApp.packageName)
+                                                    homeFolders = nh
+                                                    dockFolders = nd
+                                                    saveAllData()
+                                                    openHomeFolder = if (subLeft) nh.firstOrNull { it.id == folder.id }
+                                                        else HomeFolderState.navStack.lastOrNull()?.let { parent ->
+                                                            HomeFolderState.navStack = HomeFolderState.navStack.dropLast(1)
+                                                            liveFolder(parent, nh, nd)
+                                                        }
                                                 } else if (isDockFolder) {
                                                     val updatedDFs = dockFolders.map { f ->
                                                         if (f.id == folder.id) {
@@ -8006,7 +8027,8 @@ fun LauncherScreen(
                                                         } else f
                                                     }
                                                     val updatedDF = updatedDFs.find { it.id == folder.id }
-                                                    if (updatedDF != null && updatedDF.appPackageNames.count { it.isNotEmpty() } <= 1) {
+                                                    if (updatedDF != null && updatedDF.appPackageNames.count { it.isNotEmpty() } <= 1 &&
+                                                        updatedDF.appPackageNames.none { com.bearinmind.launcher314.data.isFolderEntry(it) }) {
                                                         // Dock folder dissolves → remaining app becomes dock app
                                                         val remainingPkg = updatedDF.appPackageNames.firstOrNull { it.isNotEmpty() }
                                                         if (remainingPkg != null) {

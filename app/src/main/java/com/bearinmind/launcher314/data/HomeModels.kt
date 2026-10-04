@@ -232,6 +232,48 @@ fun unnestSubFolder(
     return Triple(newHome, newDock, reopened)
 }
 
+/** Issue #129: a sub-folder down to ≤1 app dissolves into its parent's slot (not onto hidden page -2). */
+fun dissolveSubFolder(
+    homeFolders: List<HomeFolder>,
+    dockFolders: List<DockFolder>,
+    subId: String,
+    remaining: String?
+): Pair<List<HomeFolder>, List<DockFolder>> {
+    val marker = folderEntry(subId)
+    fun swap(entries: List<String>) = entries.map { if (it == marker) remaining ?: "" else it }.dropLastWhile { it.isEmpty() }
+    return homeFolders.filter { it.id != subId }
+        .map { f -> if (marker in f.appPackageNames) f.copy(appPackageNames = swap(f.appPackageNames)) else f } to
+        dockFolders.map { f -> if (marker in f.appPackageNames) f.copy(appPackageNames = swap(f.appPackageNames)) else f }
+}
+
+/** Issue #129: "Remove from folder" in a sub-folder moves the app up into its parent. Returns (home, dock, sub-folder kept). */
+fun moveUpFromSubFolder(
+    homeFolders: List<HomeFolder>,
+    dockFolders: List<DockFolder>,
+    subId: String,
+    pkg: String
+): Triple<List<HomeFolder>, List<DockFolder>, Boolean> {
+    val marker = folderEntry(subId)
+    fun place(entries: List<String>): List<String> {
+        val free = entries.indexOfFirst { it.isEmpty() }
+        return if (free >= 0) entries.toMutableList().apply { set(free, pkg) } else entries + pkg
+    }
+    val home = homeFolders.map { f ->
+        when {
+            f.id == subId -> f.copy(appPackageNames = f.appPackageNames.map { if (it == pkg) "" else it }.dropLastWhile { it.isEmpty() })
+            marker in f.appPackageNames -> f.copy(appPackageNames = place(f.appPackageNames))
+            else -> f
+        }
+    }
+    val dock = dockFolders.map { f -> if (marker in f.appPackageNames) f.copy(appPackageNames = place(f.appPackageNames)) else f }
+    val live = home.firstOrNull { it.id == subId }?.appPackageNames?.filter { it.isNotEmpty() } ?: emptyList()
+    if (live.size <= 1 && live.none { isFolderEntry(it) }) {
+        val (h, d) = dissolveSubFolder(home, dock, subId, live.firstOrNull())
+        return Triple(h, d, false)
+    }
+    return Triple(home, dock, true)
+}
+
 /** Folder reorder (issue #88): insert at [toIdx] and shift the occupied run toward the vacated [fromIdx] — no swapping. */
 fun insertIntoFolderCellMap(cellMap: Map<Int, String>, fromIdx: Int, toIdx: Int, pkg: String): Map<Int, String> {
     val newMap = cellMap.toMutableMap()

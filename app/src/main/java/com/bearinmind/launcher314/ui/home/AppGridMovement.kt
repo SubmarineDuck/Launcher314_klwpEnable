@@ -515,11 +515,11 @@ fun DraggableGridCell(
                                     // Calculate position relative to screen
                                     val touchPosition = cellPosition + longPress.position
                                     hapticFeedback.performLongPress()
-                                    onLongPress(touchPosition)
+                                    currentOnLongPress(touchPosition)
                                 } else {
                                     // Null also means "swiped past touchSlop" — only a real release is a tap.
                                     val upEvent = currentEvent.changes.firstOrNull { it.id == down.id }
-                                    if (upEvent != null && !upEvent.pressed) onTap()
+                                    if (upEvent != null && !upEvent.pressed) currentOnTap()
                                 }
                             }
                         }
@@ -672,19 +672,19 @@ fun DraggableGridCell(
                                                     )
                                                     lastDragPosition = change.position
                                                     change.consume()
-                                                    onDrag(dragDelta)
+                                                    currentOnDrag(dragDelta)
                                                 }
                                             } else {
                                                 // Finger released - only call onDragEnd if we own the drag
                                                 if (dragStarted && checkIsDragOwner()) {
-                                                    onDragEnd()
+                                                    currentOnDragEnd()
                                                 }
                                                 // Menu stays visible if not dragged (already shown)
                                                 break
                                             }
                                         }
                                     } catch (e: Exception) {
-                                        if (dragStarted && checkIsDragOwner()) onDragEnd()
+                                        if (dragStarted && checkIsDragOwner()) currentOnDragEnd()
                                     } finally {
                                         isLongPressActive = false
                                         isFingerDown = false
@@ -695,7 +695,7 @@ fun DraggableGridCell(
                                     // awaitLongPressOrCancellation returns null for tap, so handle it
                                     val upEvent = currentEvent.changes.firstOrNull()
                                     if (upEvent != null && !upEvent.pressed) {
-                                        onTap()
+                                        currentOnTap()
                                     }
                                 }
                             }
@@ -1481,6 +1481,8 @@ private fun FolderGridCell(
     val cellContext = LocalContext.current
     val currentOnDragStart by rememberUpdatedState(onDragStart)
     val currentOnTap by rememberUpdatedState(onTap)
+    val currentOnDrag by rememberUpdatedState(onDrag)
+    val currentOnDragEnd by rememberUpdatedState(onDragEnd)
     var showContextMenu by showContextMenuState
     // Track if we're in a potential drag state (long press started but not yet dragging)
     var isLongPressActive by remember { mutableStateOf(false) }
@@ -1582,17 +1584,17 @@ private fun FolderGridCell(
                                         )
                                         lastDragPosition = change.position
                                         change.consume()
-                                        onDrag(dragDelta)
+                                        currentOnDrag(dragDelta)
                                     }
                                 } else {
                                     if (dragStarted && checkIsDragOwner()) {
-                                        onDragEnd()
+                                        currentOnDragEnd()
                                     }
                                     break
                                 }
                             }
                         } catch (e: Exception) {
-                            if (dragStarted && checkIsDragOwner()) onDragEnd()
+                            if (dragStarted && checkIsDragOwner()) currentOnDragEnd()
                         } finally {
                             isLongPressActive = false
                             isFolderFingerDown = false
@@ -1601,7 +1603,7 @@ private fun FolderGridCell(
                         isFolderFingerDown = false
                         val upEvent = currentEvent.changes.firstOrNull()
                         if (upEvent != null && !upEvent.pressed) {
-                            onTap()
+                            currentOnTap()
                         }
                     }
                 }
@@ -2091,6 +2093,10 @@ fun DockSlot(
     // folder-open popup grows from / covers the real dock icon, like home folders.
     onFolderIconPositioned: ((androidx.compose.ui.geometry.Rect) -> Unit)? = null
 ) {
+    // Issue #129: pointerInput(Unit) keeps its first lambda — use the latest callbacks or a refilled slot acts on its old app.
+    val currentDockDragStart by rememberUpdatedState(onDragStart)
+    val currentDockDrag by rememberUpdatedState(onDrag)
+    val currentDockDragEnd by rememberUpdatedState(onDragEnd)
     val dockCellContext = LocalContext.current
     val hapticFeedback = rememberHapticFeedback()
     // Match grid cell coordinate system - use same markerHalfSize for uniform sizing
@@ -2223,7 +2229,7 @@ fun DockSlot(
                                                 // Movement after long press = start drag, hide menu
                                                 dragStarted = true
                                                 showContextMenu = false
-                                                onDragStart()
+                                                currentDockDragStart()
                                             }
 
                                             // CRITICAL: Only process drag if this handler is the actual drag owner
@@ -2235,19 +2241,19 @@ fun DockSlot(
                                                     change.position.y - change.previousPosition.y
                                                 )
                                                 change.consume()
-                                                onDrag(dragDelta)
+                                                currentDockDrag(dragDelta)
                                             }
                                         } else {
                                             // Finger released - only call onDragEnd if we own the drag
                                             if (dragStarted && checkIsDragOwner()) {
-                                                onDragEnd()
+                                                currentDockDragEnd()
                                             }
                                             // Menu stays visible if not dragged (already shown)
                                             break
                                         }
                                     }
                                 } catch (e: Exception) {
-                                    if (dragStarted && checkIsDragOwner()) onDragEnd()
+                                    if (dragStarted && checkIsDragOwner()) currentDockDragEnd()
                                 } finally {
                                     isLongPressActive = false
                                     isDockFingerDown = false
@@ -2257,7 +2263,7 @@ fun DockSlot(
                                 // Long press cancelled - check if it was a tap
                                 val upEvent = currentEvent.changes.firstOrNull()
                                 if (upEvent != null && !upEvent.pressed) {
-                                    onTap()
+                                    currentDockAppTap()
                                 }
                             }
                         }
@@ -2585,7 +2591,7 @@ fun DockSlot(
                                             if (distance > touchSlop && !dragStarted) {
                                                 dragStarted = true
                                                 showContextMenu = false
-                                                onDragStart()
+                                                currentDockDragStart()
                                             }
                                             if (dragStarted && checkIsDragOwner()) {
                                                 val dragDelta = Offset(
@@ -2593,15 +2599,15 @@ fun DockSlot(
                                                     change.position.y - change.previousPosition.y
                                                 )
                                                 change.consume()
-                                                onDrag(dragDelta)
+                                                currentDockDrag(dragDelta)
                                             }
                                         } else {
-                                            if (dragStarted && checkIsDragOwner()) onDragEnd()
+                                            if (dragStarted && checkIsDragOwner()) currentDockDragEnd()
                                             break
                                         }
                                     }
                                 } catch (e: Exception) {
-                                    if (dragStarted && checkIsDragOwner()) onDragEnd()
+                                    if (dragStarted && checkIsDragOwner()) currentDockDragEnd()
                                 } finally {
                                     isLongPressActive = false
                                     isDockFingerDown = false

@@ -18,7 +18,8 @@ fun loadHomeScreenData(context: Context): HomeScreenData {
     return try {
         val file = File(context.filesDir, "home_screen_data.json")
         if (file.exists()) {
-            Json.decodeFromString<HomeScreenData>(file.readText())
+            // distinctBy heals dock folders that were saved twice.
+            Json.decodeFromString<HomeScreenData>(file.readText()).let { it.copy(dockFolders = it.dockFolders.distinctBy { f -> f.id }) }
         } else {
             HomeScreenData()
         }
@@ -46,9 +47,11 @@ fun saveHomeScreenData(context: Context, data: HomeScreenData) {
 fun loadHomeScreenPackages(context: Context): Set<String> {
     val data = loadHomeScreenData(context)
     val out = mutableSetOf<String>()
-    data.apps.forEach { out.add(it.packageName) }
+    // Issue #129: count only visible apps (not hidden page -2 or unlinked sub-folders) so the drawer doesn't hide strays.
+    val markers = (data.folders.flatMap { it.appPackageNames } + data.dockFolders.flatMap { it.appPackageNames }).filter { isFolderEntry(it) }.toSet()
+    data.apps.forEach { if (it.page >= 0) out.add(it.packageName) }
     data.dockApps.forEach { out.add(it.packageName) }
-    (data.folders.flatMap { it.appPackageNames } + data.dockFolders.flatMap { it.appPackageNames })
+    (data.folders.filter { it.page >= 0 || folderEntry(it.id) in markers }.flatMap { it.appPackageNames } + data.dockFolders.flatMap { it.appPackageNames })
         .forEach { if (it.isNotEmpty()) out.add(it.substringBefore('|')) }
     return out
 }
