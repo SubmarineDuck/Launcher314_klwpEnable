@@ -498,6 +498,10 @@ fun LauncherWithDrawer(
         isOpen = { drawerComposed },
         isHomeBusy = { HomePagerSwipeState.isSettling || HomePagerSwipeState.isDockSettling }
     )
+    // Issue #127: reload home after installs/uninstalls/disables, once no finger is down.
+    RefreshOnPackageChanges(
+        isBusy = { drawerPrebuild.fingerDown || android.os.SystemClock.uptimeMillis() - drawerPrebuild.lastTouchUp < 600 }
+    ) { homeRefreshTrigger++ }
     // Issue #123: dark status/nav bar icons while a light (light-theme) drawer scrim covers the wallpaper.
     val lightDrawerScrim = drawerScrimColor.luminance() > 0.5f &&
         com.bearinmind.launcher314.helpers.getDrawerTransparency(context) <= 40

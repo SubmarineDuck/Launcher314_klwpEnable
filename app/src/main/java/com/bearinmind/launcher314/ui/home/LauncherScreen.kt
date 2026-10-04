@@ -1314,8 +1314,11 @@ fun LauncherScreen(
             // fires on every close. The installed-app set doesn't change just from
             // closing the drawer, so only re-query when we don't have it yet (first
             // load). Package install/remove is handled by its own broadcast refresh.
-            if (allAvailableApps.isEmpty()) {
+            if (allAvailableApps.isEmpty() || com.bearinmind.launcher314.data.HomeAppScan.needsRescan(context)) {
+                // Issue #127: re-read after an uninstall/disable too, or the app stayed behind as an invisible ghost cell.
+                val scanSeq = com.bearinmind.launcher314.data.HomeAppScan.beginScan(context)
                 allAvailableApps = loadAvailableApps(context)
+                com.bearinmind.launcher314.data.HomeAppScan.scanned(scanSeq)
             } else {
                 // Shortcuts can appear while live (Direct dial, pins) — refresh just them, skip the heavy re-query.
                 allAvailableApps = allAvailableApps.filterNot { it.packageName.startsWith("shortcut_") } +
@@ -1340,9 +1343,19 @@ fun LauncherScreen(
                     (!row.packageName.startsWith("shortcut_") &&
                         runCatching { pm.getPackageInfo(row.packageName, 0) }.isSuccess)
             }
-            if (swept.size != data.apps.size) {
+            // Issue #127: drop uninstalled/disabled apps from folders and the dock too; a folder left with one app dissolves into it.
+            val sweptData = data.copy(apps = swept)
+            val pruned = com.bearinmind.launcher314.data.HomeAppScan.pruneLayout(
+                sweptData, com.bearinmind.launcher314.data.HomeAppScan.gonePackages(context, sweptData, knownPkgs))
+            if (pruned != null) {
+                homeApps = pruned.apps
+                dockApps = pruned.dockApps
+                homeFolders = pruned.folders
+                dockFolders = pruned.dockFolders
+                saveHomeScreenData(context, pruned)
+            } else if (swept.size != data.apps.size) {
                 homeApps = swept
-                saveHomeScreenData(context, data.copy(apps = swept))
+                saveHomeScreenData(context, sweptData)
             }
             appCustomizations = loadAppCustomizations(context)
             placedWidgets = WidgetManager.loadPlacedWidgets(context)
