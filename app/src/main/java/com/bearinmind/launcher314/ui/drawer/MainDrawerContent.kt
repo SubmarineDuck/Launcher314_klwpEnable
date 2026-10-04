@@ -251,8 +251,6 @@ internal fun MainDrawerContent(
     val drawerDropAnim = remember { Animatable(0f) }
     var drawerDragCurrentOffset by remember { mutableStateOf(Offset.Zero) } // snapshot for drop lerp
     var drawerDragCellSize by remember { mutableStateOf(IntSize.Zero) }
-    // Issue #126: grid scroll not yet taken out of the drag deltas (plain holder: no recomposition)
-    val drawerScrollComp = remember { floatArrayOf(0f) }
     val drawerDragScope = rememberCoroutineScope()
     val drawerHaptic = rememberHapticFeedback()
 
@@ -271,11 +269,7 @@ internal fun MainDrawerContent(
     var folderDropTargetPos by remember { mutableStateOf(Offset.Zero) } // folder center in root coords
 
     // Shared drag move/end lambdas (cell-agnostic)
-    val drawerDragMove: (Offset) -> Unit = { rawDelta ->
-        // Auto-scroll moves the dragged cell, so its next local delta includes that scroll; take it back out (issue #126).
-        val delta = if (rawDelta != Offset.Zero && drawerScrollComp[0] != 0f) {
-            rawDelta - Offset(0f, drawerScrollComp[0]).also { drawerScrollComp[0] = 0f }
-        } else rawDelta
+    val drawerDragMove: (Offset) -> Unit = { delta ->
         drawerDragOffset += delta
         if (transferredToHome) {
             // Gesture still alive — forward cell center to home screen
@@ -1350,32 +1344,47 @@ internal fun MainDrawerContent(
             LaunchedEffect(gridState) {
                 snapshotFlow { drawerDraggedItem != null }.collectLatest { dragging ->
                     if (!dragging) return@collectLatest
-                    drawerScrollComp[0] = 0f
-                    val edge = with(autoScrollDensity) { 64.dp.toPx() }
-                    val maxStep = with(autoScrollDensity) { 14.dp.toPx() }
-                    val tabAllowance = with(autoScrollDensity) { 60.dp.toPx() }
+                    val inner = with(autoScrollDensity) { 16.dp.toPx() }
+                    val gap = with(autoScrollDensity) { 8.dp.toPx() }
+                    val minBand = with(autoScrollDensity) { 40.dp.toPx() }
+                    val maxStep = with(autoScrollDensity) { 12.dp.toPx() }
                     val minMove = with(autoScrollDensity) { 48.dp.toPx() }
                     var scrolledLastFrame = false
+                    var heldFrames = 0
                     while (true) {
                         withFrameNanos { }
                         if (scrolledLastFrame) drawerDragMove(Offset.Zero) // re-check hover against the moved cells
                         scrolledLastFrame = false
-                        if (transferredToHome || isDropZoneHovered || gridBoxHeight == 0) continue
-                        if (drawerDragOffset.getDistance() < minMove) continue // not on pickup: an app picked up near an edge would scroll at once
-                        // Bands start where cells become visible: the grid box also runs under the search bar / drop zone and tab row.
+                        // Not on pickup (an app picked up near an edge would scroll at once), nor while the drop zone owns the drag.
+                        if (transferredToHome || isDropZoneHovered || gridBoxHeight == 0 || drawerDragOffset.getDistance() < minMove) {
+                            heldFrames = 0
+                            continue
+                        }
                         // Dragged icon's top/bottom edges (like the drop-zone hit test), not its center (the label area, well below the finger).
                         val y = drawerDragStartOffset.y + drawerDragOffset.y
                         val yBottom = y + drawerDragCellSize.height
-                        val top = if (!reverseSearchBar && dropZoneBounds != Rect.Zero) dropZoneBounds.bottom + tabAllowance else drawerGridRootPos.y
-                        val bottom = if (reverseSearchBar && dropZoneBounds != Rect.Zero) dropZoneBounds.top else drawerGridRootPos.y + gridBoxHeight
-                        val step = when {
-                            y < top + edge -> -maxStep * ((top + edge - y) / edge).coerceIn(0.25f, 1f)
-                            yBottom > bottom - edge -> maxStep * ((yBottom - bottom + edge) / edge).coerceIn(0.25f, 1f)
+                        // Bands sit over the tab row (up to the drop zone), not inside the grid, so a first-row drop target never scrolls away.
+                        val gridTop = drawerGridRootPos.y
+                        val gridBottom = gridTop + gridBoxHeight
+                        val dz = dropZoneBounds
+                        val zoneAbove = dz != Rect.Zero && dz.bottom <= gridTop + 1f
+                        val zoneBelow = dz != Rect.Zero && dz.top >= gridBottom - 1f
+                        val upEdge = if (zoneAbove) maxOf(gridTop - gap, dz.bottom + minBand) else gridTop + inner
+                        val upSpan = if (zoneAbove) upEdge - dz.bottom else minBand
+                        val downEdge = if (zoneBelow) minOf(gridBottom + gap, dz.top - minBand) else gridBottom - inner
+                        val downSpan = if (zoneBelow) dz.top - downEdge else minBand
+                        val depth = when {
+                            y < upEdge -> -((upEdge - y) / upSpan).coerceIn(0f, 1f)
+                            yBottom > downEdge -> ((yBottom - downEdge) / downSpan).coerceIn(0f, 1f)
                             else -> 0f
                         }
+                        // Starts gently and speeds up the longer it's held (like RecyclerView's drag auto-scroll).
+                        heldFrames = if (depth == 0f) 0 else heldFrames + 1
+                        val ramp = (0.3f + heldFrames / 40f).coerceAtMost(1f)
+                        val step = if (depth == 0f) 0f else
+                            Math.signum(depth) * maxStep * (0.25f + 0.75f * kotlin.math.abs(depth)) * ramp
                         if (step != 0f) {
-                            val used = gridState.scrollBy(step)
-                            if (used != 0f) { drawerScrollComp[0] += used; scrolledLastFrame = true }
+                            if (gridState.scrollBy(step) != 0f) scrolledLastFrame = true
                         }
                     }
                 }

@@ -230,6 +230,8 @@ internal fun FolderItem(
     val currentOnDragStarted by rememberUpdatedState(onDragStarted)
     val currentOnDragMoved by rememberUpdatedState(onDragMoved)
     val currentOnDragEnded by rememberUpdatedState(onDragEnded)
+    // Drag deltas in screen space: the drawer auto-scrolls under a held drag (issue #126), moving this cell under the finger.
+    val gestureCoords = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
 
     Box(
         modifier = Modifier
@@ -249,8 +251,9 @@ internal fun FolderItem(
                 .then(
                     if (dragEnabled) {
                         // Unified gesture: tap, long press (context menu), long press + drag
-                        Modifier.pointerInput(Unit) {
+                        Modifier.onGloballyPositioned { gestureCoords[0] = it }.pointerInput(Unit) {
                             val touchSlop = viewConfiguration.touchSlop
+                            fun screenPos(p: Offset) = gestureCoords[0]?.takeIf { it.isAttached }?.localToRoot(p) ?: p
                             awaitEachGesture {
                                 val down = awaitFirstDown()
                                 isFingerDown = true
@@ -261,7 +264,7 @@ internal fun FolderItem(
                                     showContextMenu = true
                                     flashOverlay = true
                                     var dragStarted = false
-                                    var lastPos = longPress.position
+                                    var lastPos = screenPos(longPress.position)
                                     try {
                                         while (true) {
                                             val event = awaitPointerEvent()
@@ -274,14 +277,11 @@ internal fun FolderItem(
                                                     dragStarted = true
                                                     showContextMenu = false
                                                     currentOnDragStarted!!()
-                                                    lastPos = change.position
                                                 }
                                                 if (dragStarted) {
-                                                    val delta = Offset(
-                                                        change.position.x - lastPos.x,
-                                                        change.position.y - lastPos.y
-                                                    )
-                                                    lastPos = change.position
+                                                    val pos = screenPos(change.position)
+                                                    val delta = pos - lastPos
+                                                    lastPos = pos
                                                     change.consume()
                                                     currentOnDragMoved?.invoke(delta)
                                                 }
@@ -761,6 +761,8 @@ internal fun SelectableAppItem(
     val currentOnDragStarted by rememberUpdatedState(onDragStarted)
     val currentOnDragMoved by rememberUpdatedState(onDragMoved)
     val currentOnDragEnded by rememberUpdatedState(onDragEnded)
+    // Drag deltas in screen space: the drawer auto-scrolls under a held drag (issue #126), moving this cell under the finger.
+    val gestureCoords = remember { arrayOfNulls<androidx.compose.ui.layout.LayoutCoordinates>(1) }
 
     Box {
         Column(
@@ -770,8 +772,9 @@ internal fun SelectableAppItem(
                 .then(
                     if (dragEnabled) {
                         // Unified gesture: tap, long press (context menu), long press + drag
-                        Modifier.pointerInput(app.packageName) {
+                        Modifier.onGloballyPositioned { gestureCoords[0] = it }.pointerInput(app.packageName) {
                             val touchSlop = viewConfiguration.touchSlop
+                            fun screenPos(p: Offset) = gestureCoords[0]?.takeIf { it.isAttached }?.localToRoot(p) ?: p
                             awaitEachGesture {
                                 val down = awaitFirstDown()
                                 isFingerDown = true
@@ -785,7 +788,7 @@ internal fun SelectableAppItem(
                                         showContextMenu = true
                                     }
                                     var dragStarted = false
-                                    var lastPos = longPress.position
+                                    var lastPos = screenPos(longPress.position)
                                     try {
                                         while (true) {
                                             val event = awaitPointerEvent()
@@ -799,14 +802,11 @@ internal fun SelectableAppItem(
                                                     showContextMenu = false
                                                     showBulkMenu = false
                                                     currentOnDragStarted!!()
-                                                    lastPos = change.position
                                                 }
                                                 if (dragStarted) {
-                                                    val delta = Offset(
-                                                        change.position.x - lastPos.x,
-                                                        change.position.y - lastPos.y
-                                                    )
-                                                    lastPos = change.position
+                                                    val pos = screenPos(change.position)
+                                                    val delta = pos - lastPos
+                                                    lastPos = pos
                                                     change.consume()
                                                     currentOnDragMoved?.invoke(delta)
                                                 }

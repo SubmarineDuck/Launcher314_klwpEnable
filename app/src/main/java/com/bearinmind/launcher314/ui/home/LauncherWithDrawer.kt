@@ -1312,8 +1312,9 @@ fun LauncherWithDrawer(
                             // so the drawer tracks the finger with zero frame lag.
                             dragShift = swipeUpY.value
                             isDrawerDragging = true
-                            showAppDrawer = true
                             dragShift = (dragShift + overSlop).coerceIn(0f, drawerRangePx)
+                            // Open only once it moves: a downward start (swipe-down off) flipped it open/closed and dropped the pre-built drawer.
+                            if (dragShift < drawerRangePx) showAppDrawer = true
                         }
                         drag.consume()
 
@@ -1334,6 +1335,7 @@ fun LauncherWithDrawer(
                                     // tracks the finger with zero frame lag.
                                     isDrawerDragging = true
                                     dragShift = (dragShift + dy).coerceIn(0f, drawerRangePx)
+                                    if (dragShift < drawerRangePx && !showAppDrawer) showAppDrawer = true
                                 }
                                 change.consume()
                             }

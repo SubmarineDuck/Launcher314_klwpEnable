@@ -184,7 +184,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -801,6 +800,8 @@ object HomePressSignal {
     // Where the press happened: set before bumping (MainActivity + LauncherWithDrawer).
     var launcherWasForeground = false
     var drawerWasOpen = false
+    // Last count acted on: a rebuilt home screen re-reads the count and must not replay it.
+    var handled = 0
 }
 
 // Infinite scroll (issue #73): pseudo-infinite pager. LOGICAL pages stay 0..N-1 everywhere outside the pager.
@@ -1200,8 +1201,10 @@ fun LauncherScreen(
     LaunchedEffect(Unit) {
         // Issue #73: Home press while ON the home screen returns to page 1 (Launcher3 feel). From the
         // drawer / another app the page is kept — unless the toggle forces the chosen default page.
-        // drop(1): the count held when home is rebuilt (e.g. back from Widgets) is an old press, not a new one.
-        snapshotFlow { HomePressSignal.state.intValue }.drop(1).collect { v ->
+        // Only unhandled counts: a rebuilt home (back from Widgets) re-reads an old press; Home from Settings is a new one.
+        snapshotFlow { HomePressSignal.state.intValue }.collect { v ->
+            if (v == HomePressSignal.handled) return@collect
+            HomePressSignal.handled = v
             if (v > 0) {
                 val toggleOn = com.bearinmind.launcher314.data.getReturnToDefaultPage(context)
                 val onHomeScreen = HomePressSignal.launcherWasForeground && !HomePressSignal.drawerWasOpen
