@@ -366,11 +366,23 @@ private fun reflowFolderCells(
     if (overflow.isNotEmpty()) {
         var c = 0
         for (app in overflow) {
-            while (c < cellCount && placed.containsKey(c)) c++
+            while (c < cellCount && (placed.containsKey(c) || folderCellMap.containsKey(c))) c++ // only truly empty slots
             if (c < cellCount) { placed[c] = app; c++ } else break
         }
     }
     return placed.toMap()
+}
+
+/** Issue #130: move apps stored past the visible grid to the free cell they're drawn in, or a drag duplicates them. */
+private fun normalizeFolderCellMap(cellMap: Map<Int, String>, shown: Map<Int, HomeAppInfo>, cellCount: Int): Map<Int, String> {
+    val out = cellMap.toMutableMap()
+    for ((idx, app) in shown) {
+        if (out.containsKey(idx)) continue
+        val from = out.keys.filter { it >= cellCount && out[it] == app.packageName }.minOrNull() ?: continue
+        out.remove(from)
+        out[idx] = app.packageName
+    }
+    return out
 }
 
 /** Default OPEN-folder columns: one fewer than home so folder icons stay ~home size; resizing overrides. */
@@ -7151,9 +7163,9 @@ fun LauncherScreen(
         val isDockFolder = folder.page == -1
         fun saveFolderCellMap(map: Map<Int, String>) {
             val maxIdx = if (map.isEmpty()) -1 else map.keys.max()
-            val ordered = if (maxIdx >= 0) {
+            val ordered = (if (maxIdx >= 0) {
                 (0..maxIdx).map { idx -> map[idx] ?: "" }.dropLastWhile { it.isEmpty() }
-            } else emptyList()
+            } else emptyList()) + folder.appPackageNames.filter { it in hiddenApps && it !in map.values } // keep hidden apps (not in the map)
             if (isDockFolder) {
                 val newDockFolders = dockFolders.map { f ->
                     if (f.id == folder.id) f.copy(appPackageNames = ordered) else f
@@ -7721,6 +7733,7 @@ fun LauncherScreen(
                                         },
                                         onDragStart = {
                                             if (cellApp != null) {
+                                                folderCellMap = normalizeFolderCellMap(folderCellMap, folderCellAppMap, folderCellCount)
                                                 draggedPkg = cellApp.packageName
                                                 draggedFolderCellIdx = cellIdx
                                                 dragOffset = Offset.Zero
@@ -7846,7 +7859,8 @@ fun LauncherScreen(
                                                     return@DraggableGridCell
                                                 }
 
-                                                val hoveredRaw = folderCellPositions.entries.firstOrNull { (_, pos) ->
+                                                val hoveredRaw = folderCellPositions.entries.firstOrNull { (idx, pos) ->
+                                                    idx < folderCellCount && // Issue #130: skip positions left from a bigger grid
                                                     dragCenter.x >= pos.x && dragCenter.x < pos.x + folderCellSize.width &&
                                                     dragCenter.y >= pos.y && dragCenter.y < pos.y + folderCellSize.height
                                                 }?.key

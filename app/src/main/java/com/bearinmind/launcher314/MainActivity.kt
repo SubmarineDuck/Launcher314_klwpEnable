@@ -473,6 +473,8 @@ class MainActivity : ComponentActivity() {
         // One-shot idempotent migration of legacy per-gesture prefs (issue #40) — must run before any composable reads the new keys.
         com.bearinmind.launcher314.data.migrateLegacyGesturePrefs(this)
         com.bearinmind.launcher314.data.migrateSwipeDownToggle(this)
+        // Issues #129/#130: one-time cleanup of layouts the old folder bugs damaged.
+        com.bearinmind.launcher314.data.HomeLayoutRepair.runOnce(this)
         // Clamp values left by a switched-off Extended toggle (issue #118).
         com.bearinmind.launcher314.data.clampToNormalRanges(this)
 
