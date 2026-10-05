@@ -154,6 +154,10 @@ fun buildFolderPopupCell(
     return HomeGridCell.App(cellApp, cellIdx)
 }
 
+/** Issue #131: a "folder:" marker whose sub-folder is gone (old #129 dissolves left some) — it shows and acts as an empty slot. */
+fun isBrokenFolderLink(entry: String, homeFolders: List<HomeFolder>): Boolean =
+    isFolderEntry(entry) && homeFolders.none { it.id == folderEntryId(entry) }
+
 /** Center-drop commit: fold [draggedPkg] with [targetEntry] (app → new sub-folder at the target slot;
  *  "folder:" entry → join it). Returns (homeFolders, dockFolders, reopened parent wrapper). */
 fun foldIntoSubFolder(
@@ -166,7 +170,8 @@ fun foldIntoSubFolder(
     val isDock = parent.page == -1
     var newHome = homeFolders
     val joinId = if (isFolderEntry(targetEntry)) folderEntryId(targetEntry) else null
-    val replacement = if (joinId != null) targetEntry else {
+    // Issue #131: a broken link is an empty slot, so the app takes its place (it used to join nothing and vanish).
+    val replacement = if (joinId != null) (if (isBrokenFolderLink(targetEntry, homeFolders)) draggedPkg else targetEntry) else {
         val newSub = HomeFolder(name = "Folder", position = -2, page = -2,
             appPackageNames = listOf(targetEntry, draggedPkg))
         newHome = newHome + newSub
@@ -178,8 +183,8 @@ fun foldIntoSubFolder(
         }
     }
     fun remap(entries: List<String>): List<String> = entries
+        .map { if (it == draggedPkg) "" else it } // clear the old slot first: the replacement can be the dragged app
         .map { if (it == targetEntry) replacement else it }
-        .map { if (it == draggedPkg) "" else it }
         .dropLastWhile { it.isEmpty() }
     return if (isDock) {
         val newDock = dockFolders.map { f -> if (f.id == parent.id) f.copy(appPackageNames = remap(f.appPackageNames)) else f }

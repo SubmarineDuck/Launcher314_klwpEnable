@@ -7162,9 +7162,10 @@ fun LauncherScreen(
         // Position-based cell map: cellIndex → packageName (supports empty cells between apps, filters hidden)
         // FIX: Keyed on appPackageNames too — previously only folder.id, so re-opening
         // the same folder after removing an app showed stale cached data.
-        val baseFolderCellMap = remember(folder.id, folder.appPackageNames, hiddenApps) {
+        // Issue #131: broken sub-folder links are left out too, so they act as empty slots (a drop there used to lose the app).
+        val baseFolderCellMap = remember(folder.id, folder.appPackageNames, hiddenApps, homeFolders) {
             folder.appPackageNames.withIndex()
-                .filter { it.value.isNotEmpty() && it.value !in hiddenApps }
+                .filter { it.value.isNotEmpty() && it.value !in hiddenApps && !com.bearinmind.launcher314.data.isBrokenFolderLink(it.value, homeFolders) }
                 .associate { it.index to it.value }
         }
         // Mutable overlay for drag reordering within the folder (resets when folder data changes)
