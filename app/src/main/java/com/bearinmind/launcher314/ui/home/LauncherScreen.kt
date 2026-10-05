@@ -385,6 +385,14 @@ private fun normalizeFolderCellMap(cellMap: Map<Int, String>, shown: Map<Int, Ho
     return out
 }
 
+/** Issue #131: where a drop on [target] lands — that cell if it takes the item, else the nearest empty cell; null when the page is full. */
+internal fun dropCellOrNearest(cells: List<HomeGridCell>, target: Int, columns: Int, appItem: Boolean): Int? {
+    val c = cells.getOrNull(target)
+    if (c is HomeGridCell.Empty || (appItem && (c is HomeGridCell.App || c is HomeGridCell.Folder))) return target
+    return cells.indices.filter { cells[it] is HomeGridCell.Empty }
+        .minByOrNull { val dr = it / columns - target / columns; val dc = it % columns - target % columns; dr * dr + dc * dc }
+}
+
 /** Default OPEN-folder columns: one fewer than home so folder icons stay ~home size; resizing overrides. */
 private fun folderDefaultCols(gridColumns: Int): Int = (gridColumns - 1).coerceAtLeast(2)
 
@@ -798,6 +806,8 @@ object HomeFolderState {
     val closeRequest = androidx.compose.runtime.mutableIntStateOf(0)
     // Sub-folder navigation: parent wrappers pushed on open, popped by Back (one level per press).
     var navStack: List<HomeFolder> = emptyList()
+    // Layout from just before an app was dragged out of a folder: restored if its drop finds no room (issue #131).
+    var escapeUndo: HomeScreenData? = null
 }
 
 /** Home selection mode, hoisted so gestures outside LauncherScreen can go inert while picking apps. */
@@ -2027,7 +2037,8 @@ fun LauncherScreen(
             // escape the drop cell briefly resolves to null, and those
             // fallbacks made the app snap back into the folder even when
             // dropped clearly away (had to wait for it to settle).
-            val effectiveIndex = targetGridIndex ?: findFirstEmptyCell()
+            // Issue #131: a cell that can't take it (a widget) → nearest empty cell; a full page → back into its folder (it used to vanish).
+            val effectiveIndex = (targetGridIndex ?: findFirstEmptyCell())?.let { dropCellOrNearest(targetCells, it, gridColumns, true) }
             val originalPos = dragOriginalCellPos ?: Offset.Zero
 
             if (effectiveIndex != null && !isDropAnimating) {
@@ -2112,7 +2123,16 @@ fun LauncherScreen(
                     isEditMode = false
                 }
             } else {
-                // No valid target - just reset
+                // No room (or a drop still animating): the app goes back into its folder.
+                val folderPage = dragFromFolderPage
+                HomeFolderState.escapeUndo?.let { s ->
+                    homeApps = s.apps
+                    dockApps = s.dockApps
+                    homeFolders = s.folders
+                    dockFolders = s.dockFolders
+                    saveAllData()
+                }
+                if (effectiveIndex == null) android.widget.Toast.makeText(context, "No room on this page", android.widget.Toast.LENGTH_SHORT).show()
                 dragFromFolderApp = null
                 dragFromFolderId = null
                 dragFromFolderPage = 0
@@ -2126,9 +2146,9 @@ fun LauncherScreen(
                 hoveredDockSlot = null
                 isHoveredCellValid = true
                 showFolderCreationIndicator = false
-                // Scroll back to source page if page changed
-                if (dragSourcePage != intendedPage) {
-                    dropScope.launch { pagerState.animateToLogical(totalPages, dragSourcePage) }
+                // Back to the folder's page if the drag moved off it (dragSourcePage isn't set for folder drags; dock/sub-folders stay).
+                if (folderPage >= 0 && folderPage != intendedPage) {
+                    dropScope.launch { pagerState.animateToLogical(totalPages, folderPage) }
                 }
             }
             return
@@ -2662,7 +2682,8 @@ fun LauncherScreen(
         val item = externalDragItemState ?: return cleanupExternalDrag()
         val originalPos = dragOriginalCellPos ?: return cleanupExternalDrag()
         val intendedPage = pagerState.targetPage.mod(totalPages.coerceAtLeast(1))
-        val targetGridCell = hoveredGridCell
+        // Issue #131: a cell that can't take it (a widget) → nearest empty cell (the icon used to vanish there).
+        val targetGridCell = hoveredGridCell?.let { dropCellOrNearest(buildGridCellsForPage(intendedPage), it, gridColumns, item is com.bearinmind.launcher314.data.AppInfo) }
         val targetDockSlot = hoveredDockSlot
         edgeScrollJob?.cancel()
         edgeScrollJob = null
@@ -2796,6 +2817,8 @@ fun LauncherScreen(
 
         if (dropAction == null) {
             // No valid target — just clean up
+            if (targetDockSlot == null && hoveredGridCell != null && targetGridCell == null)
+                android.widget.Toast.makeText(context, "No room on this page", android.widget.Toast.LENGTH_SHORT).show()
             cleanupExternalDrag()
             return
         }
@@ -7779,6 +7802,7 @@ fun LauncherScreen(
                                                 if (outsidePopup && cellApp != null) {
                                                     val escapedApp = allAvailableApps.find { it.packageName == cellApp.packageName }
                                                     if (escapedApp != null) {
+                                                        HomeFolderState.escapeUndo = HomeScreenData(homeApps, dockApps, homeFolders, dockFolders)
                                                         // Remove app from folder (replace with empty string to preserve positions)
                                                         if (isDockFolder) {
                                                             val updatedDFs = dockFolders.map { f ->
