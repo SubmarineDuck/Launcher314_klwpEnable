@@ -364,6 +364,7 @@ fun DraggableGridCell(
     a11yLocation: String? = null // TalkBack context appended to the name, e.g. "on home screen"
 ) {
     val cellContext = LocalContext.current
+    val cellView = androidx.compose.ui.platform.LocalView.current // window token for live-wallpaper taps (KLWP)
     val hapticFeedback = rememberHapticFeedback()
     // Use rememberUpdatedState so pointerInput always calls the latest callbacks
     val currentOnDragStart by rememberUpdatedState(onDragStart)
@@ -519,7 +520,22 @@ fun DraggableGridCell(
                                 } else {
                                     // Null also means "swiped past touchSlop" — only a real release is a tap.
                                     val upEvent = currentEvent.changes.firstOrNull { it.id == down.id }
-                                    if (upEvent != null && !upEvent.pressed) currentOnTap()
+                                    if (upEvent != null && !upEvent.pressed) {
+                                        currentOnTap()
+                                        // Forward the tap to the live wallpaper (KLWP etc.), like
+                                        // AOSP Launcher3 does for taps on empty home-screen space.
+                                        if (!isFolderPopupCell) {
+                                            runCatching {
+                                                val p = cellPosition + down.position
+                                                android.app.WallpaperManager.getInstance(cellContext)
+                                                    .sendWallpaperCommand(
+                                                        cellView.windowToken,
+                                                        android.app.WallpaperManager.COMMAND_TAP,
+                                                        p.x.toInt(), p.y.toInt(), 0, null
+                                                    )
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
