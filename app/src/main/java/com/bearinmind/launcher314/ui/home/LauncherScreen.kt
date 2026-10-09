@@ -1215,6 +1215,7 @@ fun LauncherScreen(
     var totalPages by remember { mutableIntStateOf(prefs.getInt("launcher_total_pages", 1)) }
     val loopHome = remember { com.bearinmind.launcher314.data.getInfiniteScrollHome(context) }
     val pagerState = rememberLoopedPagerState(loopHome, totalPages, prefs.getInt("launcher_current_page", 0))
+    WallpaperPageOffsetEffect(pagerState, totalPages)
     val currentPage by remember { derivedStateOf { pagerState.currentPage.mod(totalPages.coerceAtLeast(1)) } }
     // Launcher3-style page snap, hoisted so the dots strip shares it (issue #89).
     val homePageSnapSpec = remember { lessAnim(spring<Float>(dampingRatio = 0.9f, stiffness = 500f)) }
