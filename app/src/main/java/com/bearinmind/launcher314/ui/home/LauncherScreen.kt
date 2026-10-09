@@ -877,7 +877,23 @@ internal fun rememberLoopedPagerState(loop: Boolean, real: Int, initialLogical: 
     }
     return state
 }
-
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun WallpaperPageOffsetEffect(pagerState: androidx.compose.foundation.pager.PagerState, totalPages: Int) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    androidx.compose.runtime.LaunchedEffect(pagerState, totalPages, view) {
+        val wm = android.app.WallpaperManager.getInstance(ctx)
+        val n = totalPages.coerceAtLeast(1)
+        runCatching { wm.setWallpaperOffsetSteps(if (n > 1) 1f / (n - 1) else 1f, 1f) }
+        androidx.compose.runtime.snapshotFlow {
+            pagerState.currentPage.mod(n) + pagerState.currentPageOffsetFraction
+        }.collect { pos ->
+            val x = if (n > 1) (pos / (n - 1)).coerceIn(0f, 1f) else 0.5f
+            runCatching { view.windowToken?.let { wm.setWallpaperOffsets(it, x, 0.5f) } }
+        }
+    }
+}
 /** Animate to a LOGICAL page, taking the short way around the ring when looping. */
 @OptIn(ExperimentalFoundationApi::class)
 internal suspend fun androidx.compose.foundation.pager.PagerState.animateToLogical(
